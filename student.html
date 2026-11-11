@@ -399,6 +399,11 @@
                             const parsed = JSON.parse(body);
                             params.p = Array.isArray(parsed) ? parsed[0] : parsed;
                         }
+
+                        // 从查询串里把筛选条件（id=eq.7 这种）提取出来，交给更新函数使用
+                        const m = finalUrl.match(/[?&]id=eq\.([^&]+)/);
+                        if (m) params.row_id = decodeURIComponent(m[1]);
+
                         if (tableMatch) {
                             const table = tableMatch[1];
                             const fn = method === 'POST' ? 'ec_insert' : 'ec_update';
@@ -406,7 +411,8 @@
                                 .filter(k => params[k] !== undefined)
                                 .map(k => encodeURIComponent(k) + '=' + encodeURIComponent(typeof params[k] === 'object' ? JSON.stringify(params[k]) : params[k]))
                                 .join('&');
-                            const wantRows = /return=representation|return=minimal/i.test(Object.entries(headers).find(([k]) => k.toLowerCase() === 'prefer') ? Object.entries(headers).find(([k]) => k.toLowerCase() === 'prefer')[1] : '');
+                            const preferVal = (Object.entries(headers).find(([k]) => k.toLowerCase() === 'prefer') || [, ''])[1];
+                            const wantRows = /representation|minimal/i.test(String(preferVal));
                             return {
                                 url: `${SUPABASE_URL}/rest/v1/rpc/${fn}?apikey=${encodeURIComponent(SUPABASE_KEY)}&t=${encodeURIComponent(table)}&${qs}`,
                                 method: 'GET',
@@ -967,17 +973,37 @@
 4. 返回严格 JSON：{"has_error": true, "hints": ["拼写", "搭配"], "error_words": ["确切的错词"]}。没报错给 false。`;
 
             try {
-                const response = await fetch(localStorage.getItem('baseUrl'), {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-                    body: JSON.stringify({ model: localStorage.getItem('model'), messages: [{ role: "system", content: systemPrompt }, { role: "user", content: text }], temperature: 0 })
-                });
+                const response = await aiFetch({
+                    model: getAiModel(),
+                    messages: [{ role: "system", content: systemPrompt }, { role: "user", content: text }],
+                    temperature: 0
+                }, 2);
+
+                if (!response.ok) {
+                    // 让真实的接口错误浮出来，而不是一律显示“解析失败”
+                    if (currentReqId === requestVersion) {
+                        const msg = response.status === 401 || response.status === 403
+                            ? '实时检查暂不可用（API Key 无权限）'
+                            : (response.status === 402 || response.status === 429 ? '实时检查太频繁，稍等一下' : '实时检查暂不可用');
+                        hintTags.innerHTML = `<span style="color:var(--text-muted); font-size:13px;">${msg}</span>`;
+                    }
+                    return;
+                }
+
                 const data = await response.json();
                 if (currentReqId !== requestVersion) return;
 
-                let resContent = data.choices[0].message.content.replace(/```json/g, '').replace(/```/g, '').trim();
-                let result = JSON.parse(resContent);
-
-                if (!result.has_error || result.error_words.length === 0) {
+                const raw = data && data.choices && data.choices[0] && data.choices[0].message ? String(data.choices[0].message.content || '') : '';
+                const resContent = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
+                let result;
+                try {
+                    result = JSON.parse(resContent);
+                } catch (parseErr) {
+                    // AI 偶尔会多说几句，把 JSON 片段抠出来再用
+                    const m = resContent.match(/\{[\s\S]*\}/);
+                    if (m) { try { result = JSON.parse(m[0]); } catch (e2) { result = null; } }
+                }
+                if (!result || !result.has_error || !Array.isArray(result.error_words) || result.error_words.length === 0) {
                     hintTags.innerHTML = '<div class="hint-success">暂无基础硬伤</div>';
                     mirror.classList.remove('show');
                     return;
@@ -995,7 +1021,12 @@
                 });
                 mirror.innerHTML = mirrorText; mirror.classList.add('show');
             } catch (error) {
-                if (currentReqId === requestVersion) hintTags.innerHTML = '<span style="color:var(--danger); font-size:13px;">解析失败...</span>';
+                if (currentReqId === requestVersion) {
+                    // 不再一律说“解析失败”，把真实原因显示出来
+                    const msg = String((error && error.message) || '');
+                    const human = /failed to fetch|load failed|network/i.test(msg) ? '实时检查连不上（网络/代理）' : '实时检查暂时不可用';
+                    hintTags.innerHTML = `<span style="color:var(--text-muted); font-size:13px;">${human}</span>`;
+                }
             }
         }
 
@@ -1145,10 +1176,7 @@ ${reportFormat}
             chatHistory = [{ role: "user", content: judgePrompt }];
 
             try {
-                const response = await fetch(localStorage.getItem('baseUrl'), {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-                    body: JSON.stringify({ model: localStorage.getItem('model'), messages: chatHistory, stream: true })
-                });
+                const response = await aiFetch({ model: getAiModel(), messages: chatHistory, stream: true });
 
                 finalReportMarkdown = await handleStreamResponse(response, analysisContent);
                 
@@ -1185,7 +1213,14 @@ ${reportFormat}
                 document.getElementById('followup-section').classList.add('show');
 
             } catch (error) {
-                analysisContent.innerHTML += `<br><span style="color:red">失败：${error.message}</span>`;
+                const msg = String((error && error.message) || error || '');
+                let human = msg;
+                if (/failed to fetch|load failed|networkerror|network request failed/i.test(msg)) {
+                    human = "连不上 AI 服务（网络或代理问题，已自动重试）。\n\n请检查手机是否开了代理/VPN，或换 Wi-Fi 再试。";
+                } else if (/连不上 AI 服务/.test(msg)) {
+                    human = "连不上 AI 服务，可能被网络或代理拦截了。\n\n请先关掉 VPN/代理再试，或切换到手机流量。";
+                }
+                analysisContent.innerHTML += `<br><span style="color:red">失败：${escapeHtmlSafe(human)}</span>`;
                 submitBtn.disabled = false;
                 submitBtn.dataset.retrySync = '0';
                 submitBtn.innerText = "重新诊断";
@@ -1454,10 +1489,7 @@ ${reportFormat}
                     ...chatHistory
                 ];
 
-                const response = await fetch(localStorage.getItem('baseUrl'), {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-                    body: JSON.stringify({ model: localStorage.getItem('model'), messages: safeMessages, stream: true })
-                });
+                const response = await aiFetch({ model: getAiModel(), messages: safeMessages, stream: true });
 
                 const fullText = await handleStreamResponse(response, aiBubble);
                 chatHistory.push({ role: "assistant", content: fullText });
@@ -1471,8 +1503,65 @@ ${reportFormat}
             }
         }
 
+        // ================= AI 接口：统一取地址 + 失败自动重试 =================
+        // 原因：手机上开了代理/VPN 时，请求经常第一次被掐断，表现为“网络请求失败”。
+        // 这里做的是：地址兜底、每次新建连接、失败后等待 1 秒再重试一次。
+        const DEFAULT_BASE_URL = 'https://api.deepseek.com/v1/chat/completions';
+        const DEFAULT_MODEL = 'deepseek-chat';
+
+        function getAiBaseUrl() {
+            let url = String(localStorage.getItem('baseUrl') || '').trim();
+            if (!url) url = DEFAULT_BASE_URL;
+            url = url.trim().replace(/\/+$/, ''); // 去掉尾部斜杠
+            // 容错：用户可能只填了域名
+            if (!/^https?:\/\//i.test(url)) url = 'https://' + url.replace(/^\/+/, '');
+            // 容错：只填到 /v1 或域名
+            if (!/\/chat\/completions/i.test(url)) {
+                if (/\/v\d+$/i.test(url)) url += '/chat/completions';
+                else url += '/v1/chat/completions';
+            }
+            return url;
+        }
+
+        function getAiModel() {
+            return String(localStorage.getItem('model') || '').trim() || DEFAULT_MODEL;
+        }
+
+        async function aiFetch(bodyObj, attempts = 2) {
+            const url = getAiBaseUrl();
+            const apiKey = localStorage.getItem('apiKey');
+            let lastError = null;
+            for (let i = 0; i < attempts; i++) {
+                if (i > 0) await new Promise(r => setTimeout(r, 1200));
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+                        body: JSON.stringify(bodyObj),
+                        cache: 'no-store',
+                        keepalive: false
+                    });
+                    // 4xx（Key/额度问题）不重试，直接交给上层报具体原因
+                    if (response.status >= 400 && response.status < 500) return response;
+                    return response;
+                } catch (e) {
+                    lastError = e;
+                }
+            }
+            throw new Error('连不上 AI 服务（网络或代理问题），已自动重试仍未成功');
+        }
+
         async function handleStreamResponse(response, targetElement) {
-            if (!response.ok) throw new Error("网络请求失败");
+            if (!response.ok) {
+                // 把接口返回的真实原因读出来，翻译成人话
+                let detail = '';
+                try { detail = (await response.text()).slice(0, 300); } catch (e) {}
+                let friendly = `AI 服务返回异常（${response.status}）`;
+                if (response.status === 401 || response.status === 403) friendly = 'API Key 无效或已过期';
+                else if (response.status === 402 || response.status === 429) friendly = 'API 额度不足或请求太频繁';
+                else if (response.status >= 500) friendly = 'AI 服务器暂时繁忙';
+                throw new Error(friendly + (detail ? '：' + detail.replace(/\s+/g, ' ').slice(0, 100) : ''));
+            }
             
             const reader = response.body.getReader();
             const decoder = new TextDecoder("utf-8");
@@ -1634,10 +1723,8 @@ ${reportFormat}
 ${recentReports}`;
 
             try {
-                const response = await fetch(localStorage.getItem('baseUrl'), {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('apiKey')}` },
-                    body: JSON.stringify({ model: localStorage.getItem('model'), messages: [{ role: "user", content: prompt }], temperature: 0.3 })
-                });
+                const response = await aiFetch({ model: getAiModel(), messages: [{ role: "user", content: prompt }], temperature: 0.3 });
+                if (!response.ok) throw new Error('AI 服务返回 ' + response.status);
                 const data = await response.json();
                 let content = data.choices[0].message.content.replace(/```json/g, '').replace(/```/g, '').trim();
                 let result = JSON.parse(content);
