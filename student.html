@@ -10,7 +10,7 @@
     
     <script>
         // 页面版本号：改代码时一起改，用来确认学生打开的到底是不是最新版
-        window.__APP_VERSION__ = '2026-11-11.4';
+        window.__APP_VERSION__ = '2026-11-11.5';
         marked.setOptions({ breaks: true, gfm: true });
         window.onload = function() {
             var v = document.getElementById('app-version');
@@ -480,6 +480,7 @@
         }
 
         // 自检专用：验证“表单直写”通道能否真正写进表（写一条永远不会被看板显示的自检记录）
+        // 返回详细结果，包含 HTTP 状态和服务器原话，方便判断卡在哪一层
         async function diagInsertFallback() {
             const row = {
                 name: '__自检__',
@@ -490,15 +491,21 @@
                 created_at: new Date().toISOString()
             };
             const u = `${SUPABASE_URL}/rest/v1/english_coach?apikey=${encodeURIComponent(SUPABASE_KEY)}&select=id`;
-            const r = await fetch(u, {
-                method: 'POST',
-                mode: 'cors',
-                cache: 'no-store',
-                headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-                body: JSON.stringify([row])
-            });
-            const text = await r.text();
-            return r.ok || text.trim().startsWith('[');
+            try {
+                const r = await fetch(u, {
+                    method: 'POST',
+                    mode: 'cors',
+                    cache: 'no-store',
+                    headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+                    body: JSON.stringify([row])
+                });
+                const text = await r.text();
+                const ok = r.ok || text.trim().startsWith('[');
+                return { ok, status: r.status, text: String(text).replace(/\s+/g, ' ').slice(0, 200) };
+            } catch (e) {
+                // 跨域被拦时浏览器不给状态码，只能报 TypeError
+                return { ok: false, status: 0, text: 'TypeError（请求被浏览器拦截，可能是跨域预检未通过）', error: String(e && e.message || e) };
+            }
         }
 
         // 查询：只用一种最朴素的方式发送（和直接在地址栏打开完全一致）
@@ -677,10 +684,14 @@
                 flush();
             }
 
-            // 第2步补充：如果 RPC 写不进去，如实报告“已自动改用表单直写”
+            // 写入兜底测试：把 HTTP 状态和服务器原话一起显示，便于判断卡在哪一层
             try {
-                const ok = await diagInsertFallback();
-                lines.push('　　写入兜底：' + (ok ? 'RPC 不可用，但表单直写成功' : 'RPC 不可用，表单直写也没成功'));
+                const fb = await diagInsertFallback();
+                if (fb.ok) {
+                    lines.push('　　写入兜底：表单直写成功（HTTP ' + fb.status + '），写入通道正常');
+                } else {
+                    lines.push('　　写入兜底：表单直写失败（HTTP ' + fb.status + '）· ' + fb.text.slice(0, 120));
+                }
             } catch (e) {
                 lines.push('　　写入兜底：失败（' + (e && e.message ? e.message.slice(0, 80) : '未知') + '）');
             }
