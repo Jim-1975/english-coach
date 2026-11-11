@@ -10,7 +10,7 @@
     
     <script>
         // 页面版本号：改代码时一起改，用来确认学生打开的到底是不是最新版
-        window.__APP_VERSION__ = '2026-11-11.3';
+        window.__APP_VERSION__ = '2026-11-11.4';
         marked.setOptions({ breaks: true, gfm: true });
         window.onload = function() {
             var v = document.getElementById('app-version');
@@ -738,6 +738,11 @@
         }
 
         function copyDiag() {
+            const custom = window.__diagCustomText;
+            if (custom && custom.trim()) {
+                return doCopyToClipboard(custom);
+            }
+
             const text = window.__diagText || '';
             if (!text) { alert('还没有测试结果，请先点【测试云端连接】。'); return; }
             const done = () => alert('已复制，直接粘贴发给老师即可。');
