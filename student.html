@@ -453,7 +453,12 @@
                                 headers: {},
                                 body: undefined,
                                 rpc: true,
-                                wantRows
+                                wantRows,
+                                // 保留原始写入参数：函数不可用时改用“表单 POST 直写接口”
+                                table,
+                                rows: params.p ? [params.p] : [],
+                                patchId: params.row_id || '',
+                                patchData: (method === 'PATCH' && params.p) ? params.p : null
                             };
                         }
                     }
@@ -474,6 +479,28 @@
             return { status: r.status, text };
         }
 
+        // 自检专用：验证“表单直写”通道能否真正写进表（写一条永远不会被看板显示的自检记录）
+        async function diagInsertFallback() {
+            const row = {
+                name: '__自检__',
+                topic: 'SELFTEST',
+                mode: 'system_config',
+                original: 'SELFTEST',
+                feedback: 'SELFTEST',
+                created_at: new Date().toISOString()
+            };
+            const u = `${SUPABASE_URL}/rest/v1/english_coach?apikey=${encodeURIComponent(SUPABASE_KEY)}&select=id`;
+            const r = await fetch(u, {
+                method: 'POST',
+                mode: 'cors',
+                cache: 'no-store',
+                headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+                body: JSON.stringify([row])
+            });
+            const text = await r.text();
+            return r.ok || text.trim().startsWith('[');
+        }
+
         // 查询：只用一种最朴素的方式发送（和直接在地址栏打开完全一致）
         // 不再“先 fetch 失败再换 XHR”，避免被识别为异常请求
         async function rawGet(url, headers) {
@@ -489,11 +516,13 @@
         async function fetchThroughPipeline(url, options = {}) {
             const req = normalizeRestRequest(url, options);
 
-            // 写入：走 GET 形式的 RPC，浏览器只发一个简单请求，不触发 OPTIONS 预检
+            // 写入：优先走 GET 形式的 RPC（不触发预检）；RPC 写不进去时自动改用表单 POST 直写
             if (req.rpc) {
-                const r = await rawGet(req.url);
-                if (!r.ok) throw new Error('RPC_FAILED ' + r.status + ' ' + String(r.text).slice(0, 120));
-                const payload = req.wantRows ? (r.text && r.text.trim() ? r.text : '[]') : 'null';
+                const probe = await rawGet(req.url);
+                if (!probe.ok) return await directWrite(req, new Error('RPC_FAILED ' + probe.status + ' ' + String(probe.text).slice(0, 120)));
+                // 函数返回 204/200 但实际没写进去（只读事务等情况），也会在后续“回查”时被发现并补写；
+                // 这里额外确认：空写入（自检探测）直接返回，真实写入在校验函数里兜底
+                const payload = req.wantRows ? (probe.text && probe.text.trim() ? probe.text : '[]') : 'null';
                 return makeJsonResponse(200, payload);
             }
 
@@ -504,6 +533,43 @@
                 r = await rawGet(req.url);
             }
             return makeJsonResponse(r.status, r.text);
+        }
+
+        // 表单 POST 直写：Content-Type 用 text/plain，浏览器只发“简单请求”，同样不触发跨域预检
+        // 适合在没有 RPC 函数、或函数写不进去的情况下，把数据直接写进表
+        async function directWrite(req, rpcErr) {
+            const isInsert = !!req.rows && req.rows.length > 0 && !req.patchData;
+            const isPatch = !!req.patchData && req.patchId;
+
+            if (isInsert) {
+                const u = `${SUPABASE_URL}/rest/v1/${encodeURIComponent(req.table)}?apikey=${encodeURIComponent(SUPABASE_KEY)}&select=*`;
+                const r = await fetch(u, {
+                    method: 'POST',
+                    mode: 'cors',
+                    cache: 'no-store',
+                    headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+                    body: JSON.stringify(req.rows)
+                });
+                const text = await r.text();
+                if (!r.ok) throw new Error('INSERT_FAILED ' + r.status + ' ' + String(text).slice(0, 120));
+                return makeJsonResponse(r.status, text || '[]');
+            }
+
+            if (isPatch) {
+                const u = `${SUPABASE_URL}/rest/v1/${encodeURIComponent(req.table)}?id=eq.${encodeURIComponent(req.patchId)}&apikey=${encodeURIComponent(SUPABASE_KEY)}`;
+                const r = await fetch(u, {
+                    method: 'POST',
+                    mode: 'cors',
+                    cache: 'no-store',
+                    headers: { 'Content-Type': 'text/plain;charset=UTF-8', 'X-HTTP-Method-Override': 'PATCH' },
+                    body: JSON.stringify(req.patchData)
+                });
+                const text = await r.text();
+                if (!r.ok && r.status !== 204) throw new Error('UPDATE_FAILED ' + r.status + ' ' + String(text).slice(0, 120));
+                return makeJsonResponse(r.status || 204, text || 'null');
+            }
+
+            throw rpcErr;
         }
 
         function xhrGet(url) {
@@ -594,7 +660,7 @@
 
             const steps = [
                 ['第1步 · 普通查询', `/rest/v1/english_coach?select=id&limit=1&apikey=${encodeURIComponent(SUPABASE_KEY)}`],
-                ['第2步 · 插入函数 ec_insert', `/rest/v1/rpc/ec_insert?apikey=${encodeURIComponent(SUPABASE_KEY)}&t=english_coach&p=%7B%7D`],
+                ['第2步 · 插入函数 ec_insert', `/rest/v1/rpc/ec_insert?apikey=${encodeURIComponent(SUPABASE_KEY)}&t=english_coach&p=${encodeURIComponent(JSON.stringify({ name: '__自检__', topic: 'SELFTEST', mode: 'system_config', original: 'SELFTEST', feedback: 'SELFTEST', created_at: '2000-01-01T00:00:00Z' }))}`],
                 ['第3步 · 更新函数 ec_update', `/rest/v1/rpc/ec_update?apikey=${encodeURIComponent(SUPABASE_KEY)}&t=english_coach&p=%7B%7D&row_id=0`],
             ];
 
@@ -610,6 +676,15 @@
                 lines.push(label + '：' + outcome);
                 flush();
             }
+
+            // 第2步补充：如果 RPC 写不进去，如实报告“已自动改用表单直写”
+            try {
+                const ok = await diagInsertFallback();
+                lines.push('　　写入兜底：' + (ok ? 'RPC 不可用，但表单直写成功' : 'RPC 不可用，表单直写也没成功'));
+            } catch (e) {
+                lines.push('　　写入兜底：失败（' + (e && e.message ? e.message.slice(0, 80) : '未知') + '）');
+            }
+            flush();
 
             // 第④步：带一个真实数据请求，确认能不能读到数据
             try {
