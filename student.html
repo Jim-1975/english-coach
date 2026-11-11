@@ -308,6 +308,8 @@
             <input type="text" id="base-url" placeholder="Base URL" value="https://api.deepseek.com/v1/chat/completions">
             <input type="text" id="model" placeholder="Model" value="deepseek-chat">
             <button class="btn" onclick="saveConfig()">保存配置</button>
+            <button class="btn btn-secondary" onclick="runDiag()" style="font-size: 13px; padding: 10px;">🔧 测试云端连接</button>
+            <div id="diag-result" style="font-size: 12px; color: #333; background: #f2f2f7; border-radius: 12px; padding: 12px; display: none;"></div>
         </div>
     </div>
 
@@ -516,6 +518,61 @@
                 }
             }
             return { data: null, error: lastError || { message: 'UNKNOWN' } };
+        }
+
+        // ---------- 排查工具：一键测试云端连接，把真实原因显示出来 ----------
+        async function runDiag() {
+            const box = document.getElementById('diag-result');
+            if (!box) return;
+            box.style.display = 'block';
+            box.innerHTML = '正在依次测试云端连接...';
+            const lines = [];
+            const key = localStorage.getItem('apiKey') || '';
+
+            lines.push('页面地址：' + location.href.split('?')[0]);
+            lines.push('浏览器：' + (navigator.userAgent || '').slice(0, 60));
+            lines.push('当前 Key 前 6 位：' + (key ? key.slice(0, 6) + '…（共 ' + key.length + ' 位）' : '（空）'));
+            lines.push('');
+
+            const steps = [
+                ['① 普通查询', `/rest/v1/english_coach?select=id&limit=1&apikey=${encodeURIComponent(SUPABASE_KEY)}`],
+                ['② 插入函数 ec_insert', `/rest/v1/rpc/ec_insert?apikey=${encodeURIComponent(SUPABASE_KEY)}&t=english_coach&p=%7B%7D`],
+                ['③ 更新函数 ec_update', `/rest/v1/rpc/ec_update?apikey=${encodeURIComponent(SUPABASE_KEY)}&t=english_coach&p=%7B%7D&row_id=0`],
+            ];
+
+            for (const [label, path] of steps) {
+                const url = SUPABASE_URL + path;
+                let outcome = '';
+                try {
+                    const r = await new Promise((resolve, reject) => {
+                        const xhr = new XMLHttpRequest();
+                        xhr.open('GET', url, true);
+                        xhr.timeout = 12000;
+                        xhr.onload = () => resolve({ status: xhr.status, text: xhr.responseText });
+                        xhr.onerror = () => reject(new Error('网络错误'));
+                        xhr.ontimeout = () => reject(new Error('超时'));
+                        xhr.send();
+                    });
+                    outcome = `HTTP ${r.status} · ${String(r.text || '').replace(/\s+/g, ' ').slice(0, 120) || '(空)'}`;
+                } catch (e) {
+                    outcome = '无法连接：' + e.message;
+                }
+                lines.push(label + '：' + outcome);
+            }
+
+            box.innerHTML = '<pre style="white-space:pre-wrap; word-break:break-all; font-size:12px; line-height:1.7; margin:0;">' + escapeHtmlSafe(lines.join('\n')) +
+                '</pre><button class="btn" style="margin-top:12px; padding:8px 16px; font-size:13px;" onclick="copyDiag()">复制结果</button>';
+            window.__diagText = lines.join('\n');
+        }
+
+        function copyDiag() {
+            const text = window.__diagText || '';
+            try {
+                navigator.clipboard.writeText(text).then(
+                    () => alert('已复制，发给老师即可'),
+                    () => alert(text)
+                );
+            } catch (e) { alert(text); }
         }
 
         // 初始化配置
