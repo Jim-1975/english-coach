@@ -435,16 +435,22 @@
             return { url: finalUrl, method, headers, body, rpc: false };
         }
 
-        // 查询：先用朴素 fetch，失败再换 XHR（某些内嵌浏览器里 fetch 被拦但 XHR 可用）
+        // 自检专用：和浏览器地址栏完全一样的普通 GET
+        async function diagPlainGet(url) {
+            const r = await fetch(url, { method: 'GET', cache: 'no-store' });
+            const text = await r.text();
+            return { status: r.status, text };
+        }
+
+        // 查询：只用一种最朴素的方式发送（和直接在地址栏打开完全一致）
+        // 不再“先 fetch 失败再换 XHR”，避免被识别为异常请求
         async function rawGet(url, headers) {
-            try {
-                const r = await fetch(url, { method: 'GET', headers: headers || {}, cache: 'no-store', keepalive: false });
-                const text = await r.text();
-                return { ok: r.ok, status: r.status, text };
-            } catch (e) {
-                const text = await xhrGet(url);
-                return { ok: true, status: 200, text };
-            }
+            const hasHeaders = headers && Object.keys(headers).length > 0;
+            const r = await fetch(url, hasHeaders
+                ? { method: 'GET', headers, cache: 'no-store' }
+                : { method: 'GET', cache: 'no-store' });
+            const text = await r.text();
+            return { ok: r.ok, status: r.status, text };
         }
 
         // 统一出口：所有到 Supabase 的请求都经过这里
@@ -544,20 +550,48 @@
                 const url = SUPABASE_URL + path;
                 let outcome = '';
                 try {
-                    const r = await new Promise((resolve, reject) => {
-                        const xhr = new XMLHttpRequest();
-                        xhr.open('GET', url, true);
-                        xhr.timeout = 12000;
-                        xhr.onload = () => resolve({ status: xhr.status, text: xhr.responseText });
-                        xhr.onerror = () => reject(new Error('网络错误'));
-                        xhr.ontimeout = () => reject(new Error('超时'));
-                        xhr.send();
-                    });
+                    const r = await diagPlainGet(url);
                     outcome = `HTTP ${r.status} · ${String(r.text || '').replace(/\s+/g, ' ').slice(0, 120) || '(空)'}`;
                 } catch (e) {
-                    outcome = '无法连接：' + e.message;
+                    outcome = '失败（' + (e && e.name ? e.name : '网络错误') + '）';
                 }
                 lines.push(label + '：' + outcome);
+            }
+
+            // 第④步：带一个真实数据请求，确认能不能读到数据
+            try {
+                const r = await diagPlainGet(SUPABASE_URL + '/rest/v1/english_coach?select=id&limit=1&apikey=' + encodeURIComponent(SUPABASE_KEY));
+                lines.push('④ 读取数据：HTTP ' + r.status + ' · ' + (String(r.text).replace(/\s+/g, ' ').slice(0, 100) || '(空)'));
+            } catch (ee) {
+                lines.push('④ 读取数据：失败（' + (ee && ee.name ? ee.name : '网络错误') + '）');
+            }
+
+            // 第⑤步：AI 服务是否可达（学生写作业要用）
+            try {
+                await new Promise((resolve, reject) => {
+                    const img = new Image();
+                    const timer = setTimeout(() => reject(new Error('超时')), 10000);
+                    img.onload = () => { clearTimeout(timer); resolve('成功'); };
+                    img.onerror = () => { clearTimeout(timer); resolve('失败（域名不可达或被拦截）'); };
+                    img.src = SUPABASE_URL + '/favicon.ico?_=' + Date.now();
+                }).then(r => lines.push('⑤ 云端域名连通性：' + r));
+            } catch (ee) {
+                lines.push('⑤ 云端域名连通性：' + ee.message);
+            }
+
+            try {
+                const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+                const t = ctrl ? setTimeout(() => ctrl.abort(), 12000) : null;
+                const ar = await fetch(getAiBaseUrl().replace('/chat/completions', '/models'), {
+                    method: 'GET',
+                    headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('apiKey') || '') },
+                    cache: 'no-store',
+                    signal: ctrl ? ctrl.signal : undefined
+                });
+                if (t) clearTimeout(t);
+                lines.push('⑥ AI 服务连通性：HTTP ' + ar.status + (ar.status === 401 || ar.status === 403 ? '（能连上，但 Key 无效）' : ar.status === 200 ? '（正常）' : ''));
+            } catch (ee) {
+                lines.push('⑥ AI 服务连通性：失败（' + (ee && ee.name ? ee.name : '网络错误') + '）');
             }
 
             box.innerHTML = '<pre style="white-space:pre-wrap; word-break:break-all; font-size:12px; line-height:1.7; margin:0;">' + escapeHtmlSafe(lines.join('\n')) +
@@ -731,8 +765,17 @@
                 const bindData = bindRes.data;
 
                 if (bindData) {
-                    // 老用户，直接登录
+                    // 这个 Key 已经绑定过账号
                     studentName = bindData.name;
+                    // 同一个人可能填过不同名字（例如第一次多加了个空格），提示一下
+                    if (inputName && inputName !== bindData.name) {
+                        alert(
+                            `这个 API Key 之前已经绑定在【${bindData.name}】名下。\n\n` +
+                            `你在姓名栏写的是【${inputName}】，系统会继续按【${bindData.name}】记录你的成绩，` +
+                            `这样历史记录和老师布置的任务都不会丢。\n\n` +
+                            `如果【${bindData.name}】不是你的名字，说明这个 Key 被别人用过，请找老师换一个。`
+                        );
+                    }
                     document.getElementById('welcome-msg').innerText = `欢迎回来，${studentName}`;
                     await checkTaskAndProceed();
                 } else {
@@ -783,18 +826,42 @@
                                 .select('id')
                                 .eq('mode', 'system_config')
                                 .eq('topic', configTopic)
-                                .eq('name', studentName)
                                 .limit(1), 2);
                             return r.error ? null : (Array.isArray(r.data) && r.data.length > 0);
                         }
                     });
 
-                    // 最终确认：云端真的查得到这条绑定才继续
-                    const bound = await confirmBinding(configTopic, studentName);
-                    if (bound === false) {
+                    // 最终确认：云端真的查得到这个 Key 的绑定才继续
+                    // 注意：这里按 Key 查，而不是按“名字”查——两人同时用同一个 Key 时，
+                    // 先写进去的那个人就是正式身份，后一个会自动沿用，不会卡死在“绑定失败”。
+                    const bindCheck = await sbCall('绑定确认', c => c.from('english_coach')
+                        .select('name')
+                        .eq('mode', 'system_config')
+                        .eq('topic', configTopic)
+                        .limit(1)
+                        .maybeSingle(), 2);
+
+                    if (bindCheck.error) {
+                        // 连不上查询：先放行，等交作业时会再校验
+                        await checkTaskAndProceed();
+                        return;
+                    }
+
+                    if (!bindCheck.data) {
                         btn.disabled = false;
                         btn.innerText = "验证并进入";
                         return alert("这台设备没把账号信息同步到云端（网络被拦截了一次）。\n\n请再点一次【验证并进入】，或换一个网络后重试。\n\n如果一直不行，请把这句话发给老师：新 Key 绑定失败。");
+                    }
+
+                    // 云端已有的名字才是正式身份；如果和本地打算用的不一样，说明这个 Key 刚被别人占用
+                    const cloudName = bindCheck.data.name;
+                    if (cloudName !== studentName) {
+                        studentName = cloudName;
+                        alert(
+                            `刚刚有另一台设备也用了同一个 Key 登录，系统已经把它记在【${cloudName}】名下。\n\n` +
+                            `为避免成绩记错人，本次登录将沿用【${cloudName}】。\n\n` +
+                            `如果这不是你的名字，请找老师要一个专属 Key。`
+                        );
                     }
                     // bound === null 表示连不上查询：先让学生进去，稍后提交时会再校验
 
