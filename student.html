@@ -10,7 +10,7 @@
     
     <script>
         // 页面版本号：改代码时一起改，用来确认学生打开的到底是不是最新版
-        window.__APP_VERSION__ = '2026-11-11.5';
+        window.__APP_VERSION__ = '2026-11-11.6';
         marked.setOptions({ breaks: true, gfm: true });
         window.onload = function() {
             var v = document.getElementById('app-version');
@@ -496,7 +496,12 @@
                     method: 'POST',
                     mode: 'cors',
                     cache: 'no-store',
-                    headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'apikey': SUPABASE_KEY,
+                        'Authorization': 'Bearer ' + SUPABASE_KEY,
+                        'Prefer': 'return=representation'
+                    },
                     body: JSON.stringify([row])
                 });
                 const text = await r.text();
@@ -542,11 +547,19 @@
             return makeJsonResponse(r.status, r.text);
         }
 
-        // 表单 POST 直写：Content-Type 用 text/plain，浏览器只发“简单请求”，同样不触发跨域预检
-        // 适合在没有 RPC 函数、或函数写不进去的情况下，把数据直接写进表
+        // 直写：用标准 JSON 请求头发送 POST
+        // 之前试过用 text/plain 伪装成“简单请求”来省掉预检，但 Supabase 服务端明确拒收
+        // （PGRST102 Content-Type not acceptable: text/plain），所以改为标准 JSON。
         async function directWrite(req, rpcErr) {
             const isInsert = !!req.rows && req.rows.length > 0 && !req.patchData;
             const isPatch = !!req.patchData && req.patchId;
+
+            const jsonHeaders = {
+                'Content-Type': 'application/json',
+                'apikey': SUPABASE_KEY,
+                'Authorization': 'Bearer ' + SUPABASE_KEY,
+                'Prefer': 'return=representation'
+            };
 
             if (isInsert) {
                 const u = `${SUPABASE_URL}/rest/v1/${encodeURIComponent(req.table)}?apikey=${encodeURIComponent(SUPABASE_KEY)}&select=*`;
@@ -554,25 +567,25 @@
                     method: 'POST',
                     mode: 'cors',
                     cache: 'no-store',
-                    headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+                    headers: jsonHeaders,
                     body: JSON.stringify(req.rows)
                 });
                 const text = await r.text();
-                if (!r.ok) throw new Error('INSERT_FAILED ' + r.status + ' ' + String(text).slice(0, 120));
+                if (!r.ok) throw new Error('INSERT_FAILED ' + r.status + ' ' + String(text).slice(0, 160));
                 return makeJsonResponse(r.status, text || '[]');
             }
 
             if (isPatch) {
-                const u = `${SUPABASE_URL}/rest/v1/${encodeURIComponent(req.table)}?id=eq.${encodeURIComponent(req.patchId)}&apikey=${encodeURIComponent(SUPABASE_KEY)}`;
+                const u = `${SUPABASE_URL}/rest/v1/${encodeURIComponent(req.table)}?id=eq.${encodeURIComponent(req.patchId)}&apikey=${encodeURIComponent(SUPABASE_KEY)}&select=*`;
                 const r = await fetch(u, {
-                    method: 'POST',
+                    method: 'PATCH',
                     mode: 'cors',
                     cache: 'no-store',
-                    headers: { 'Content-Type': 'text/plain;charset=UTF-8', 'X-HTTP-Method-Override': 'PATCH' },
+                    headers: jsonHeaders,
                     body: JSON.stringify(req.patchData)
                 });
                 const text = await r.text();
-                if (!r.ok && r.status !== 204) throw new Error('UPDATE_FAILED ' + r.status + ' ' + String(text).slice(0, 120));
+                if (!r.ok && r.status !== 204) throw new Error('UPDATE_FAILED ' + r.status + ' ' + String(text).slice(0, 160));
                 return makeJsonResponse(r.status || 204, text || 'null');
             }
 
