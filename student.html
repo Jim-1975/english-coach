@@ -9,10 +9,14 @@
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     
     <script>
+        // 页面版本号：改代码时一起改，用来确认学生打开的到底是不是最新版
+        window.__APP_VERSION__ = '2026-11-11.3';
         marked.setOptions({ breaks: true, gfm: true });
         window.onload = function() {
+            var v = document.getElementById('app-version');
+            if (v) v.innerText = 'v' + window.__APP_VERSION__;
             if (typeof window.supabase === 'undefined') {
-                alert("⚠️ 当前浏览器环境不兼容\n\n请点击右上角【...】复制本网页链接，然后打开 Chrome 或 Safari 浏览器粘贴访问。\n\n（否则您的答卷将无法同步给老师！）");
+                alert("当前浏览器环境不兼容\n\n请点击右上角【...】复制本网页链接，然后打开 Chrome 或 Safari 浏览器粘贴访问。\n\n（否则您的答卷将无法同步给老师！）");
             }
         };
     </script>
@@ -130,6 +134,15 @@
         .config-inner { background: #fff; width: 100%; max-width: 400px; padding: 30px; border-radius: 24px; display: flex; flex-direction: column; gap: 15px; }
         .config-inner input { padding: 16px; border-radius: 14px; background: #f2f2f7; border: none; font-size: 15px;}
 
+        /* 自检结果弹层：内容默认收起，弹层随内容缩小；展开时结果区自己滚动，底部按钮永远可见 */
+        #diag-panel { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); backdrop-filter: blur(10px); z-index: 2500; justify-content: center; align-items: center; padding: 16px; }
+        .diag-inner { background: #fff; width: 100%; max-width: 440px; max-height: 86vh; border-radius: 24px; display: flex; flex-direction: column; overflow: hidden; }
+        .diag-head { padding: 20px 22px 12px; flex-shrink: 0; }
+        .diag-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 22px 8px; }
+        .diag-scroll pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; line-height: 1.7; margin: 0; background: #f2f2f7; border-radius: 12px; padding: 12px; color: #333; }
+        .diag-actions-row { flex-shrink: 0; display: flex; gap: 8px; padding: 4px 22px 8px; }
+        .diag-foot { flex-shrink: 0; display: flex; gap: 10px; padding: 10px 22px calc(16px + env(safe-area-inset-bottom)); border-top: 1px solid rgba(0,0,0,0.06); background: #fff; }
+
         /* 复盘历史面板 */
         #history-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); backdrop-filter: blur(15px); z-index: 1500; justify-content: center; align-items: center; padding: 20px; }
         .history-inner { background: var(--bg-base); width: 100%; max-width: 800px; max-height: 90vh; border-radius: 32px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.2); animation: scaleIn 0.3s ease; }
@@ -192,7 +205,7 @@
 <body>
 
     <header>
-        <h1>English Coach <span class="assign-badge" id="assign-badge">任务模式</span></h1>
+        <h1>English Coach <span class="assign-badge" id="assign-badge">任务模式</span><span id="app-version" style="font-size: 11px; font-weight: 500; color: var(--text-muted); margin-left: 2px;"></span></h1>
         <div style="display: flex; gap: 10px;">
             <button class="btn btn-secondary" id="reset-btn" style="padding: 8px 16px; font-size: 14px; display: none;" onclick="backToSetup()">重练</button>
             <button class="btn btn-secondary" id="history-btn" style="padding: 8px 16px; font-size: 14px;" onclick="openHistoryModal()">复盘</button>
@@ -308,8 +321,27 @@
             <input type="text" id="base-url" placeholder="Base URL" value="https://api.deepseek.com/v1/chat/completions">
             <input type="text" id="model" placeholder="Model" value="deepseek-chat">
             <button class="btn" onclick="saveConfig()">保存配置</button>
-            <button class="btn btn-secondary" onclick="runDiag()" style="font-size: 13px; padding: 10px;">🔧 测试云端连接</button>
-            <div id="diag-result" style="font-size: 12px; color: #333; background: #f2f2f7; border-radius: 12px; padding: 12px; display: none;"></div>
+            <button class="btn btn-secondary" onclick="runDiag()" style="font-size: 13px; padding: 10px;">测试云端连接</button>
+            <button class="btn btn-secondary" onclick="closeConfig()" style="font-size: 13px; padding: 10px;">关闭</button>
+        </div>
+    </div>
+
+    <!-- 自检结果：独立弹层。内容默认收起，复制按钮固定在底部，任何屏幕都点得到 -->
+    <div id="diag-panel">
+        <div class="diag-inner">
+            <div class="diag-head">
+                <h2 style="font-size: 18px; font-weight: 800;">云端连接检查结果</h2>
+                <p style="font-size: 12px; color: #8e8e93; margin-top: 4px;">点【复制结果】发给老师即可，需要看细节再点【展开】</p>
+            </div>
+            <div id="diag-result" class="diag-scroll" style="display: none;"></div>
+            <div class="diag-actions-row">
+                <button class="btn btn-secondary" id="diag-toggle-btn" onclick="toggleDiagDetail()" style="padding: 12px; font-size: 14px;">展开</button>
+                <button class="btn btn-secondary" id="diag-version-btn" onclick="alert('当前页面版本：' + (window.__APP_VERSION__ || '未知'))" style="padding: 12px; font-size: 13px;">版本</button>
+            </div>
+            <div class="diag-foot">
+                <button class="btn" onclick="copyDiag()" style="flex: 1; padding: 15px; font-size: 16px;">复制结果</button>
+                <button class="btn btn-secondary" onclick="closeDiag()" style="flex: 1; padding: 15px; font-size: 16px;">关闭</button>
+            </div>
         </div>
     </div>
 
@@ -530,20 +562,40 @@
         async function runDiag() {
             const box = document.getElementById('diag-result');
             if (!box) return;
-            box.style.display = 'block';
-            box.innerHTML = '正在依次测试云端连接...';
+
+            // 换成独立的检查结果弹层：内容默认收起，复制按钮固定在底部
+            const configPanel = document.getElementById('config-panel');
+            if (configPanel) configPanel.style.display = 'none';
+            const panel = document.getElementById('diag-panel');
+            if (panel) panel.style.display = 'flex';
+
+            // 默认收起详情，只留复制按钮
+            box.style.display = 'none';
+            const toggleBtn = document.getElementById('diag-toggle-btn');
+            if (toggleBtn) toggleBtn.innerText = '展开';
+
+            box.innerHTML = '<pre>正在依次测试云端连接，请稍候...</pre>';
+            box.scrollTop = 0;
+
             const lines = [];
             const key = localStorage.getItem('apiKey') || '';
 
+            lines.push('页面版本：' + (window.__APP_VERSION__ || '未知'));
             lines.push('页面地址：' + location.href.split('?')[0]);
             lines.push('浏览器：' + (navigator.userAgent || '').slice(0, 60));
             lines.push('当前 Key 前 6 位：' + (key ? key.slice(0, 6) + '…（共 ' + key.length + ' 位）' : '（空）'));
             lines.push('');
 
+            const flush = () => {
+                box.innerHTML = '<pre>' + escapeHtmlSafe(lines.join('\n')) + '</pre>';
+                window.__diagText = lines.join('\n');
+            };
+            flush();
+
             const steps = [
-                ['① 普通查询', `/rest/v1/english_coach?select=id&limit=1&apikey=${encodeURIComponent(SUPABASE_KEY)}`],
-                ['② 插入函数 ec_insert', `/rest/v1/rpc/ec_insert?apikey=${encodeURIComponent(SUPABASE_KEY)}&t=english_coach&p=%7B%7D`],
-                ['③ 更新函数 ec_update', `/rest/v1/rpc/ec_update?apikey=${encodeURIComponent(SUPABASE_KEY)}&t=english_coach&p=%7B%7D&row_id=0`],
+                ['第1步 · 普通查询', `/rest/v1/english_coach?select=id&limit=1&apikey=${encodeURIComponent(SUPABASE_KEY)}`],
+                ['第2步 · 插入函数 ec_insert', `/rest/v1/rpc/ec_insert?apikey=${encodeURIComponent(SUPABASE_KEY)}&t=english_coach&p=%7B%7D`],
+                ['第3步 · 更新函数 ec_update', `/rest/v1/rpc/ec_update?apikey=${encodeURIComponent(SUPABASE_KEY)}&t=english_coach&p=%7B%7D&row_id=0`],
             ];
 
             for (const [label, path] of steps) {
@@ -556,15 +608,17 @@
                     outcome = '失败（' + (e && e.name ? e.name : '网络错误') + '）';
                 }
                 lines.push(label + '：' + outcome);
+                flush();
             }
 
             // 第④步：带一个真实数据请求，确认能不能读到数据
             try {
                 const r = await diagPlainGet(SUPABASE_URL + '/rest/v1/english_coach?select=id&limit=1&apikey=' + encodeURIComponent(SUPABASE_KEY));
-                lines.push('④ 读取数据：HTTP ' + r.status + ' · ' + (String(r.text).replace(/\s+/g, ' ').slice(0, 100) || '(空)'));
+                lines.push('第4步 · 读取数据：HTTP ' + r.status + ' · ' + (String(r.text).replace(/\s+/g, ' ').slice(0, 100) || '(空)'));
             } catch (ee) {
-                lines.push('④ 读取数据：失败（' + (ee && ee.name ? ee.name : '网络错误') + '）');
+                lines.push('第4步 · 读取数据：失败（' + (ee && ee.name ? ee.name : '网络错误') + '）');
             }
+            flush();
 
             // 第⑤步：AI 服务是否可达（学生写作业要用）
             try {
@@ -574,10 +628,11 @@
                     img.onload = () => { clearTimeout(timer); resolve('成功'); };
                     img.onerror = () => { clearTimeout(timer); resolve('失败（域名不可达或被拦截）'); };
                     img.src = SUPABASE_URL + '/favicon.ico?_=' + Date.now();
-                }).then(r => lines.push('⑤ 云端域名连通性：' + r));
+                }).then(r => lines.push('第5步 · 云端域名连通性：' + r));
             } catch (ee) {
-                lines.push('⑤ 云端域名连通性：' + ee.message);
+                lines.push('第5步 · 云端域名连通性：' + ee.message);
             }
+            flush();
 
             try {
                 const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -589,24 +644,67 @@
                     signal: ctrl ? ctrl.signal : undefined
                 });
                 if (t) clearTimeout(t);
-                lines.push('⑥ AI 服务连通性：HTTP ' + ar.status + (ar.status === 401 || ar.status === 403 ? '（能连上，但 Key 无效）' : ar.status === 200 ? '（正常）' : ''));
+                lines.push('第6步 · AI 服务连通性：HTTP ' + ar.status + (ar.status === 401 || ar.status === 403 ? '（能连上，但 Key 无效）' : ar.status === 200 ? '（正常）' : ''));
             } catch (ee) {
-                lines.push('⑥ AI 服务连通性：失败（' + (ee && ee.name ? ee.name : '网络错误') + '）');
+                lines.push('第6步 · AI 服务连通性：失败（' + (ee && ee.name ? ee.name : '网络错误') + '）');
             }
+            flush();
+        }
 
-            box.innerHTML = '<pre style="white-space:pre-wrap; word-break:break-all; font-size:12px; line-height:1.7; margin:0;">' + escapeHtmlSafe(lines.join('\n')) +
-                '</pre><button class="btn" style="margin-top:12px; padding:8px 16px; font-size:13px;" onclick="copyDiag()">复制结果</button>';
-            window.__diagText = lines.join('\n');
+        // 展开 / 收起详情。弹层高度随内容自适应，按钮始终在底部
+        function toggleDiagDetail() {
+            const box = document.getElementById('diag-result');
+            const btn = document.getElementById('diag-toggle-btn');
+            if (!box) return;
+            const showing = box.style.display !== 'none';
+            box.style.display = showing ? 'none' : 'block';
+            if (btn) btn.innerText = showing ? '展开' : '收起';
+            if (!showing) box.scrollTop = 0;
         }
 
         function copyDiag() {
             const text = window.__diagText || '';
-            try {
-                navigator.clipboard.writeText(text).then(
-                    () => alert('已复制，发给老师即可'),
-                    () => alert(text)
-                );
-            } catch (e) { alert(text); }
+            if (!text) { alert('还没有测试结果，请先点【测试云端连接】。'); return; }
+            const done = () => alert('已复制，直接粘贴发给老师即可。');
+            const fallback = () => {
+                try {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.setAttribute('readonly', '');
+                    ta.style.position = 'fixed';
+                    ta.style.top = '0';
+                    ta.style.left = '0';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    ta.focus();
+                    ta.select();
+                    ta.setSelectionRange(0, text.length);
+                    const ok = document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    if (ok) { done(); } else { throw new Error('execCommand failed'); }
+                } catch (e) {
+                    // 最后兜底：自动展开详情，让学生长按手动复制
+                    const box = document.getElementById('diag-result');
+                    const btn = document.getElementById('diag-toggle-btn');
+                    if (box) { box.style.display = 'block'; }
+                    if (btn) { btn.innerText = '收起'; }
+                    alert('自动复制没有成功。已为你展开内容，请长按上面的文字，选择“全选”后复制。');
+                }
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(done, fallback);
+            } else {
+                fallback();
+            }
+        }
+
+        function closeConfig() {
+            document.getElementById('config-panel').style.display = 'none';
+        }
+
+        function closeDiag() {
+            const panel = document.getElementById('diag-panel');
+            if (panel) panel.style.display = 'none';
         }
 
         // 初始化配置
@@ -617,7 +715,7 @@
             document.getElementById('base-url').value = localStorage.getItem('baseUrl') || 'https://api.deepseek.com/v1/chat/completions';
             document.getElementById('model').value = localStorage.getItem('model') || 'deepseek-chat';
         }
-        function showConfig() { document.getElementById('config-panel').style.display = 'flex'; }
+        function showConfig() { showSettingsForm(); document.getElementById('config-panel').style.display = 'flex'; }
         function saveConfig() {
             const key = document.getElementById('api-key').value.trim();
             localStorage.setItem('apiKey', key);
@@ -625,6 +723,12 @@
             localStorage.setItem('baseUrl', document.getElementById('base-url').value.trim());
             localStorage.setItem('model', document.getElementById('model').value.trim());
             document.getElementById('config-panel').style.display = 'none';
+        }
+
+        // 每次打开设置，先恢复成普通表单的样子
+        function showSettingsForm() {
+            document.querySelectorAll('#config-panel .config-inner > input').forEach(el => { el.style.display = ''; });
+            document.querySelectorAll('#config-panel .config-inner > button').forEach(el => { el.style.display = ''; });
         }
 
         let appMode = 'writing';
@@ -874,7 +978,7 @@
                 if (String(e && e.message) === 'BIND_NETWORK') {
                     alert("连不上云端（这条网络线路可能被限制了）。\n\n请切到 Wi-Fi 或手机流量后再点一次【验证并进入】，名字和 Key 都还在，不用重填。");
                 } else if (/failed to fetch|network|load failed|econnreset|timeout/i.test(String(e && e.message))) {
-                    alert("连不上云端：网络在传输时被中断了。\n\n请换一个网络（Wi-Fi ↔ 流量）再试一次，名字和 Key 都还在。");
+                    alert("连不上云端：网络在传输时被中断了。\n\n请换一个网络（Wi-Fi 或 流量）再试一次，名字和 Key 都还在。");
                 } else {
                     alert("识别失败，请检查网络或 API Key 是否正确。");
                 }
@@ -1457,8 +1561,8 @@ ${reportFormat}
                 submitBtn.innerText = "已提交给老师";
                 removePendingUpload();
                 markTaskCompleted();
-                alert(check.confirmed === true ? "✅ 老师那边其实早就收到了这份答卷，已为你标记完成，不用再交。"
-                                               : "✅ 补交成功，老师那边已经收到了！");
+                alert(check.confirmed === true ? "老师那边其实早就收到了这份答卷，已为你标记完成，不用再交。"
+                                               : "补交成功，老师那边已经收到了！");
             } else {
                 savePendingUpload(payload, result.error);
                 submitBtn.innerText = "还是不行 · 再点一次";
@@ -1559,7 +1663,7 @@ ${reportFormat}
                 pendingSyncRunning = false;
             }
             if (!silent) {
-                if (okCount > 0) alert(`✅ 已确认 ${okCount} 份答卷送达老师！`);
+                if (okCount > 0) alert(`已确认 ${okCount} 份答卷送达老师！`);
                 else alert('暂时还是联系不上云端，答卷继续保存在本机。换到 Wi-Fi 或信号好的地方打开复盘即可自动补交。');
             }
         }
@@ -2193,7 +2297,7 @@ ${recentReports}`;
                 html += `<span class="rec-tag rec-tag-level unknown">难度未记录</span>`;
             }
             html += rec.is_assigned
-                ? `<span class="rec-tag rec-tag-assigned">🎯 老师布置</span>`
+                ? `<span class="rec-tag rec-tag-assigned">老师布置</span>`
                 : `<span class="rec-tag rec-tag-free">自由练习</span>`;
             return html;
         }
