@@ -1,0 +1,1454 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>English Coach - 教师控制台</title>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <style>
+        :root {
+            --bg-base: #f2f2f7; --text-main: #000000; --text-muted: #8e8e93;
+            --glass-bg: rgba(255, 255, 255, 0.8); --glass-border: rgba(255, 255, 255, 0.9);
+            --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+            --primary: #000; --success: #34c759; --danger: #ff3b30;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+        
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif; color: var(--text-main); 
+            min-height: 100vh; background-color: var(--bg-base); 
+            background-image: radial-gradient(circle at 10% 10%, rgba(255,255,255,0.8) 0%, transparent 50%), radial-gradient(circle at 90% 80%, rgba(200,200,200,0.3) 0%, transparent 50%); 
+            display: flex; flex-direction: column; align-items: center;
+        }
+        
+        .container { width: 100%; max-width: 1600px; padding: 20px; display: flex; flex-direction: column; }
+
+        /* 顶部控制栏 */
+        .top-bar { 
+            display: flex; justify-content: space-between; align-items: center; 
+            background: var(--glass-bg); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            padding: 15px 25px; border-radius: 24px; box-shadow: var(--glass-shadow);
+            border: 1px solid var(--glass-border);
+            margin-bottom: 24px; position: sticky; top: 20px; z-index: 100;
+        }
+        .title-area { display: flex; align-items: center; gap: 15px; }
+        h1 { font-size: 22px; color: #000; margin: 0; font-weight: 800; letter-spacing: -0.5px;}
+        .count-badge { background: var(--primary); color: #fff; padding: 6px 16px; border-radius: 20px; font-weight: 600; font-size: 14px; box-shadow: 0 4px 10px rgba(0,0,0,0.15);}
+        
+        .action-area { display: flex; gap: 10px; align-items: center; }
+        .search-box { 
+            padding: 12px 20px; border-radius: 100px; border: 1px solid rgba(0,0,0,0.1); 
+            background: rgba(255,255,255,0.8); color: #000; outline: none; width: 240px; font-size: 15px;
+            transition: all 0.3s; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
+        }
+        .search-box:focus { background: #fff; box-shadow: 0 0 0 4px rgba(0,0,0,0.05); border-color: #000; }
+        
+        .btn { padding: 12px 20px; border-radius: 100px; cursor: pointer; font-size: 15px; font-weight: 600; border: none; transition: all 0.2s; white-space: nowrap; }
+        .btn-primary { background: var(--primary); color: #fff; }
+        .btn-danger { background: rgba(255, 59, 48, 0.1); color: var(--danger); border: 1px solid rgba(255, 59, 48, 0.2); }
+        .btn:active { transform: scale(0.95); opacity: 0.8; }
+
+        /* 首页网格布局 */
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; width: 100%; }
+        @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+
+        /* 缩略卡片 */
+        .student-card { 
+            background: var(--glass-bg); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border); border-radius: 20px; padding: 20px; 
+            box-shadow: var(--glass-shadow); animation: slideIn 0.4s ease; 
+            display: flex; align-items: center; gap: 15px; cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .student-card:hover { transform: translateY(-5px); box-shadow: 0 15px 35px rgba(0,0,0,0.1); }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(-15px); } to { opacity: 1; transform: translateY(0); } }
+        .new-arrival { border-color: var(--success); box-shadow: 0 0 30px rgba(52, 199, 89, 0.3); }
+        
+        .avatar { width: 50px; height: 50px; border-radius: 50%; background: var(--primary); color: #fff; display: flex; justify-content: center; align-items: center; font-size: 20px; font-weight: 800; flex-shrink: 0; }
+        .info { flex: 1; overflow: hidden; }
+        .info-name { font-size: 18px; font-weight: 800; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: baseline; }
+        .info-time { font-size: 12px; color: var(--text-muted); }
+        .tag-row { display: flex; gap: 8px; margin-top: 8px; }
+        .tag { font-size: 11px; padding: 4px 8px; border-radius: 6px; font-weight: 600; }
+        .tag-writing { background: rgba(79, 110, 247, 0.1); color: #4f6ef7; }
+        .tag-translation { background: rgba(224, 85, 157, 0.1); color: #e0559d; }
+        .tag-assigned { background: rgba(255, 157, 0, 0.1); color: #ff9d00; }
+        .tag-free { background: rgba(0, 0, 0, 0.05); color: #666; }
+        .tag-level { background: rgba(0, 0, 0, 0.07); color: #000; }
+        .tag-level.unknown { background: rgba(0, 0, 0, 0.03); color: #999; font-weight: 500; }
+
+        /* 历史记录卡片上的标签行 */
+        .history-item-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+
+        /* 详情页：身份与进度 */
+        .progress-item { display: flex; justify-content: space-between; gap: 15px; padding: 10px 0; border-bottom: 1px dashed rgba(0,0,0,0.06); font-size: 14px; color: #666; }
+        .progress-item:last-child { border-bottom: none; padding-bottom: 0; }
+        .progress-item b { color: #000; font-weight: 700; text-align: right; }
+
+        /* 弹窗通用遮罩 */
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(10px); z-index: 1000; justify-content: center; align-items: center; padding: 20px; }
+        
+        /* 详情主弹窗 */
+        .modal-card {
+            background: var(--bg-base); width: 100%; max-width: 1000px; max-height: 90vh;
+            border-radius: 32px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); 
+            display: flex; flex-direction: column; overflow: hidden;
+            animation: scaleIn 0.3s ease;
+        }
+        @keyframes scaleIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+        
+        .modal-header { padding: 20px 30px; background: #fff; border-bottom: 1px solid rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;}
+        .modal-header h2 { font-size: 24px; font-weight: 800; margin: 0; display: flex; align-items: center; gap: 10px;}
+        
+        .modal-body { flex: 1; min-height: 0; overflow-y: auto; padding: 30px; display: flex; flex-direction: column; gap: 30px; }
+
+        /* 图表容器 */
+        .chart-section { background: #fff; padding: 20px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.02); }
+        .chart-title { font-size: 16px; font-weight: 700; margin-bottom: 15px; color: #333; display: flex; justify-content: space-between;}
+        .canvas-wrapper { position: relative; width: 100%; height: 200px; }
+        .chart-canvas { width: 100%; height: 100%; display: block; cursor: pointer; }
+        
+        /* 历史筛选栏 */
+        .history-header-area { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; flex-wrap: wrap; gap: 15px; }
+        .history-filter { display: flex; background: rgba(0,0,0,0.05); padding: 4px; border-radius: 100px; gap: 4px; }
+        .filter-btn { padding: 6px 16px; border-radius: 100px; border: none; background: transparent; font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; transition: all 0.2s; }
+        .filter-btn.active { background: #fff; color: #000; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+
+        /* 日期筛选与导出 */
+        .date-filter-area { display: flex; align-items: center; gap: 10px; background: #fff; padding: 6px 15px; border-radius: 100px; border: 1px solid rgba(0,0,0,0.1); }
+        .date-filter-area input { border: none; outline: none; font-size: 13px; font-family: inherit; color: #333; background: transparent; }
+        .export-btn { background: var(--primary); color: #fff; padding: 8px 16px; border-radius: 100px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; transition: all 0.2s; }
+
+        /* 历史记录列表 */
+        .history-list { display: flex; flex-direction: column; gap: 15px; }
+        .history-item { background: #fff; border-radius: 16px; padding: 20px; border: 1px solid rgba(0,0,0,0.06); box-shadow: 0 4px 15px rgba(0,0,0,0.02); display: flex; flex-direction: column; gap: 12px; position: relative; }
+        .history-item-header { font-size: 13px; color: var(--text-muted); font-weight: 600; display: flex; justify-content: space-between; align-items: center; padding-right: 35px; }
+        .history-item-topic { font-size: 16px; font-weight: 800; color: #000; padding-right: 30px;}
+        .history-item-original { font-size: 15px; color: #333; line-height: 1.7; background: #f8f9fa; padding: 15px; border-radius: 12px; white-space: pre-wrap; }
+        .detail-delete-btn { position: absolute; top: 15px; right: 15px; background: rgba(0,0,0,0.04); color: #888; border: none; width: 28px; height: 28px; border-radius: 50%; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: all 0.2s; font-size: 14px; z-index: 2; }
+        .detail-delete-btn:hover { background: var(--danger); color: #fff; }
+
+        /* 布置任务记录相关样式 */
+        .task-header-area { padding: 15px 30px; background: #fff; border-bottom: 1px solid rgba(0,0,0,0.05); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .task-list { display: flex; flex-direction: column; gap: 12px; }
+        .task-item { background: #fff; border-radius: 16px; padding: 16px 20px; border: 1px solid rgba(0,0,0,0.06); display: flex; justify-content: space-between; align-items: center; }
+        .task-info { flex: 1; }
+        .task-title { font-size: 16px; font-weight: 800; color: #000; margin-bottom: 6px; }
+        .task-meta { font-size: 13px; color: var(--text-muted); display: flex; gap: 12px; align-items: center; flex-wrap: wrap;}
+        .status-badge { padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 12px; }
+        .status-pending { background: rgba(255, 157, 0, 0.1); color: #ff9d00; }
+        .status-completed { background: rgba(52, 199, 89, 0.1); color: var(--success); }
+        .task-delete-btn { background: rgba(255, 59, 48, 0.1); color: var(--danger); border: none; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 16px; display: flex; justify-content: center; align-items: center; transition: 0.2s; margin-left: 15px;}
+        .task-delete-btn:hover { background: var(--danger); color: #fff; }
+
+        /* 布置任务弹窗里的模式切换 */
+        .segmented-control { display: flex; background: rgba(0,0,0,0.05); padding: 4px; border-radius: 100px; position: relative; margin-top: 5px;}
+        .segmented-control input { display: none; }
+        .segmented-control label { flex: 1; text-align: center; padding: 10px 0; font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; z-index: 2; transition: color 0.3s;}
+        .segmented-bg { position: absolute; top: 4px; left: 4px; height: calc(100% - 8px); width: calc(50% - 4px); background: #fff; border-radius: 100px; transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); z-index: 1; box-shadow: 0 2px 8px rgba(0,0,0,0.1);}
+        #assign-mode-translation:checked ~ .segmented-bg { transform: translateX(100%); }
+        #assign-mode-writing:checked ~ label[for="assign-mode-writing"], #assign-mode-translation:checked ~ label[for="assign-mode-translation"] { color: #000; font-weight: 800;}
+
+        /* 撤销 Toast */
+        #undo-toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(20px); background: #333; color: #fff; padding: 15px 25px; border-radius: 100px; display: flex; align-items: center; gap: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); opacity: 0; pointer-events: none; transition: all 0.3s ease; z-index: 2000; font-size: 15px; }
+        #undo-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+        #undo-toast button { background: var(--success); color: #fff; border: none; padding: 8px 16px; border-radius: 100px; font-weight: bold; cursor: pointer; font-size: 14px; margin-left: 10px; }
+
+        /* 布置作业：学生姓名下拉选择 */
+        .dropdown-list { display: none; position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: #fff; border: 1px solid rgba(0,0,0,0.08); border-radius: 14px; box-shadow: 0 12px 30px rgba(0,0,0,0.12); max-height: 220px; overflow-y: auto; z-index: 50; -webkit-overflow-scrolling: touch; }
+        .dropdown-list.show { display: block; }
+        .dropdown-item { padding: 12px 16px; font-size: 15px; color: #000; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 10px; border-bottom: 1px solid rgba(0,0,0,0.04); }
+        .dropdown-item:last-child { border-bottom: none; }
+        .dropdown-item:hover, .dropdown-item:active { background: rgba(0,0,0,0.04); }
+        .dropdown-empty { padding: 14px 16px; font-size: 13px; color: var(--text-muted); text-align: center; }
+        .dropdown-count { font-size: 12px; color: var(--text-muted); }
+
+        /* 布置作业：难度气泡 */
+        .bubble-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
+        .bubble-label { font-size: 13px; font-weight: 700; color: var(--text-muted); margin-right: 2px; }
+        .bubble { padding: 8px 16px; border-radius: 100px; border: 1px solid rgba(0,0,0,0.08); background: #fff; color: #666; font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer; transition: all 0.18s ease; -webkit-tap-highlight-color: transparent; }
+        .bubble:hover { border-color: rgba(0,0,0,0.25); color: #000; }
+        .bubble:active { transform: scale(0.95); }
+        .bubble.active { background: #000; color: #fff; border-color: #000; box-shadow: 0 4px 12px rgba(0,0,0,0.18); }
+        .bubble-row.shake { animation: bubbleShake 0.35s ease; }
+        @keyframes bubbleShake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+        @media (max-width: 600px) {
+            .top-bar { flex-direction: column; align-items: stretch; gap: 12px; position: static; }
+            .action-area { flex-wrap: wrap; }
+            .search-box { width: 100%; }
+            .modal-card { border-radius: 24px; }
+            .modal-body { padding: 18px; gap: 18px; }
+            .modal-header { padding: 16px 18px; }
+            .modal-header h2 { font-size: 19px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="top-bar">
+            <div class="title-area">
+                <h1>English Coach - 教师控制台</h1>
+                <span class="count-badge" id="total-count">0 人已交</span>
+            </div>
+            <div class="action-area">
+                <input type="text" class="search-box" id="search-input" placeholder="🔍 搜索学生名字..." oninput="filterCards()">
+                <button class="btn btn-primary" onclick="openAssignModal()">布置作业</button>
+                <button class="btn btn-primary" onclick="openTaskModal()">布置记录</button>
+                <button class="btn btn-danger" onclick="clearAllData()">清空看板</button>
+            </div>
+        </div>
+        
+        <div class="grid" id="home-grid"></div>
+    </div>
+
+    <!-- 撤销提示 -->
+    <div id="undo-toast">
+        <span>已删除该条记录</span>
+        <button onclick="undoDelete()">撤销</button>
+    </div>
+
+    <!-- 详情主弹窗 -->
+    <div id="detail-modal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2 id="detail-name">学生详情</h2>
+                <button class="btn" onclick="closeDetailModal()" style="background:#f2f2f7; color:#000;">关闭</button>
+            </div>
+            <div class="modal-body">
+                <div class="chart-section" id="detail-progress-section">
+                    <div class="chart-title"><span>🧾 身份与进度</span></div>
+                    <div id="detail-progress"></div>
+                </div>
+                <div class="chart-section">
+                    <div class="chart-title"><span>📈 写作成绩趋势 (点击圆点查看原文)</span></div>
+                    <div class="canvas-wrapper" id="wrapper-writing">
+                        <canvas id="chart-writing" class="chart-canvas"></canvas>
+                    </div>
+                </div>
+                <div class="chart-section" id="section-translation">
+                    <div class="chart-title"><span>📈 翻译成绩趋势 (点击圆点查看原文)</span></div>
+                    <div class="canvas-wrapper" id="wrapper-translation">
+                        <canvas id="chart-translation" class="chart-canvas"></canvas>
+                    </div>
+                </div>
+
+                <div class="history-header-area">
+                    <h3 style="font-size: 18px; font-weight: 800;">📜 历史答卷明细</h3>
+                    
+                    <div style="display:flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                        <button class="export-btn" onclick="exportCurrentData()">📥 导出当前记录</button>
+
+                        <div class="date-filter-area">
+                            <input type="date" id="date-start" onchange="renderHistoryList()">
+                            <span style="color:#ccc;">-</span>
+                            <input type="date" id="date-end" onchange="renderHistoryList()">
+                        </div>
+                        
+                        <div class="history-filter">
+                            <button class="filter-btn active" id="btn-filter-all" onclick="filterHistory('all')">全部</button>
+                            <button class="filter-btn" id="btn-filter-writing" onclick="filterHistory('writing')">写作</button>
+                            <button class="filter-btn" id="btn-filter-translation" onclick="filterHistory('translation')">翻译</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="history-list" id="detail-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 单次记录详情弹窗 -->
+    <div id="single-record-modal" class="modal-overlay" style="z-index: 2000; background: rgba(0,0,0,0.6);">
+        <div class="modal-card" style="max-width: 700px;">
+            <div class="modal-header" style="background:#f8f9fa;">
+                <h3 style="font-size: 18px; font-weight: 800;" id="single-record-title">答卷详情</h3>
+                <button class="btn" onclick="closeSingleRecordModal()" style="background:#e5e5ea; color:#000; padding: 8px 16px;">关闭</button>
+            </div>
+            <div class="modal-body" id="single-record-content" style="padding: 25px; font-size: 15px; line-height: 1.8; white-space: pre-wrap; color: #333;"></div>
+        </div>
+    </div>
+
+    <!-- 布置任务记录弹窗 -->
+    <div id="task-modal" class="modal-overlay">
+        <div class="modal-card" style="max-width: 800px;">
+            <div class="modal-header">
+                <h2>布置任务记录</h2>
+                <button class="btn" onclick="closeTaskModal()" style="background:#f2f2f7; color:#000;">关闭</button>
+            </div>
+            
+            <!-- 筛选操作栏 -->
+            <div class="task-header-area">
+                <input type="text" id="task-search" class="search-box" placeholder="🔍 筛选学生名字..." style="width: 200px; padding: 8px 16px; font-size: 14px;" oninput="renderTaskList()">
+                
+                <div class="date-filter-area">
+                    <input type="date" id="task-date-start" onchange="renderTaskList()">
+                    <span style="color:#ccc;">-</span>
+                    <input type="date" id="task-date-end" onchange="renderTaskList()">
+                </div>
+
+                <div class="history-filter">
+                    <button class="filter-btn active" id="btn-task-all" onclick="setTaskFilter('all')">全部</button>
+                    <button class="filter-btn" id="btn-task-writing" onclick="setTaskFilter('writing')">写作</button>
+                    <button class="filter-btn" id="btn-task-translation" onclick="setTaskFilter('translation')">翻译</button>
+                </div>
+                
+                <button class="export-btn" onclick="exportTasksData()" style="margin-left: auto;">📥 导出记录</button>
+            </div>
+
+            <div class="modal-body task-list" id="task-list">
+                <!-- 任务列表会渲染在这里 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 布置作业弹窗 -->
+    <div id="assign-modal" class="modal-overlay">
+        <div class="modal-card" style="max-width: 400px; padding: 30px;">
+            <h2 style="font-size: 22px; font-weight: 800; margin-bottom: 5px;">📌 布置专属任务</h2>
+            <div class="assign-field" style="margin-top: 15px; position: relative;">
+                <input type="text" id="assign-name" placeholder="🔍 输入或选择学生姓名..." autocomplete="off" oninput="onAssignNameInput()" onfocus="onAssignNameFocus()" style="width: 100%; padding: 16px; border-radius: 14px; border: 1px solid #ddd; font-size: 15px; font-family: inherit; outline: none;">
+                <div id="assign-suggest" class="dropdown-list"></div>
+            </div>
+            
+            
+            <div class="segmented-control">
+                <input type="radio" id="assign-mode-writing" name="assignMode" value="writing" checked>
+                <label for="assign-mode-writing">写作</label>
+                <input type="radio" id="assign-mode-translation" name="assignMode" value="translation">
+                <label for="assign-mode-translation">翻译</label>
+                <div class="segmented-bg"></div>
+            </div>
+
+            <select id="assign-level" hidden>
+                <option value="">不指定</option>
+                <option value="cet4">四级</option>
+                <option value="cet6">六级</option>
+                <option value="tem4">专四</option>
+                <option value="tem8">专八</option>
+            </select>
+
+            <div class="bubble-row" id="assign-level-row" role="radiogroup" aria-label="难度">
+                <span class="bubble-label">难度</span>
+                <button type="button" class="bubble" data-level="" onclick="pickLevel(this)">不指定</button>
+                <button type="button" class="bubble" data-level="cet4" onclick="pickLevel(this)">四级</button>
+                <button type="button" class="bubble" data-level="cet6" onclick="pickLevel(this)">六级</button>
+                <button type="button" class="bubble" data-level="tem4" onclick="pickLevel(this)">专四</button>
+                <button type="button" class="bubble" data-level="tem8" onclick="pickLevel(this)">专八</button>
+            </div>
+
+            <textarea id="assign-topic" placeholder="输入要布置的题目或原文段落..." style="width: 100%; padding: 16px; border-radius: 14px; border: 1px solid #ddd; font-size: 15px; font-family: inherit; outline: none; resize: vertical; min-height: 100px; margin-top: 15px;"></textarea>
+            <div style="display:flex; gap:10px; margin-top:15px;">
+                <button class="btn" onclick="closeAssignModal()" style="flex:1; background:#f2f2f7; color:#000;">取消</button>
+                <button class="btn btn-primary" id="assign-submit-btn" onclick="submitTask()" style="flex:1;">发布</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const SUPABASE_URL = 'https://tsfhbvfkuhwvehiosykc.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_AA40FhCsuIsdNRFFLCWTBg__ueINa-0';
+        
+        let supabaseClient = null;
+        try { if (window.supabase) supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { global: { fetch: fetchNoKeepAlive } }); } catch(e) {}
+
+        // 不走连接复用，避免中间设备重置导致“伪 CORS 失败”
+        // 注意：后台看板必须每次取最新数据，关掉浏览器缓存
+        function fetchNoKeepAlive(url, options = {}) {
+            return fetch(url, { ...options, keepalive: false, cache: 'no-store' });
+        }
+
+        // 节流：页面切到后台时暂停轮询，切回来立刻刷新一次，减少无谓请求
+        let pollTimer = null;
+        let pollPaused = false;
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                pollPaused = true;
+            } else {
+                pollPaused = false;
+                pollNewData();
+            }
+        });
+
+        // 网络类错误自动换线重试（字段/权限错误不重试，直接返回）
+        async function sbCall(fn, attempts = 3) {
+            let lastError = null;
+            for (let i = 0; i < attempts; i++) {
+                if (i > 0) await new Promise(r => setTimeout(r, i === 1 ? 600 : 1800));
+                try {
+                    const res = await fn(supabaseClient);
+                    if (res && res.error) {
+                        lastError = res.error;
+                        const msg = String(res.error.message || '');
+                        const networkLike = /failed to fetch|networkerror|load failed|econnreset|timeout|network/i.test(msg);
+                        if (!networkLike) return res;
+                        continue;
+                    }
+                    return res;
+                } catch (e) {
+                    lastError = e;
+                    const msg = String((e && e.message) || e || '');
+                    if (/401|403|permission|RLS|policy|column|schema/i.test(msg)) return { data: null, error: e };
+                }
+            }
+            return { data: null, error: lastError || { message: '网络不可用' } };
+        }
+        
+        const homeGrid = document.getElementById('home-grid');
+        const totalCount = document.getElementById('total-count');
+        
+        let allRecords = []; 
+        let deletedIds = new Set();
+        let lastDeletedRecord = null;
+        let toastTimeout = null;
+
+        let currentDetailStudent = "";
+        let currentFilter = "all";
+        let currentFilteredRecords = []; 
+
+        let allTasksData = [];
+        let currentFilteredTasks = []; // 用于导出任务记录
+        let taskFilterMode = 'all';
+
+        function formatTime(timeStr) {
+            if (!timeStr) return '刚刚';
+            try {
+                const d = new Date(timeStr);
+                if (isNaN(d.getTime())) return '刚刚';
+                return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+            } catch (e) { return '刚刚'; }
+        }
+        
+        function getDateStr(timeStr) {
+            if (!timeStr) return "";
+            const d = new Date(timeStr);
+            if (isNaN(d.getTime())) return "";
+            return d.toISOString().split('T')[0];
+        }
+
+        function extractScore(feedback) {
+            if (!feedback) return null;
+            const match = feedback.match(/(\d+(?:\.\d+)?)\s*\/\s*(15|20)/);
+            if (match) return { score: parseFloat(match[1]), fullScore: parseInt(match[2]) };
+            return null;
+        }
+
+        // ---------- 难度与来源识别（不新增数据库字段）----------
+        const LEVEL_LABELS = { cet4: '四级', cet6: '六级', tem4: '专四', tem8: '专八' };
+
+        function cleanTopic(topic) {
+            return String(topic == null ? '' : topic).replace(/\n?\s*ECLEVEL:[a-z0-9]+\s*$/i, '').trim();
+        }
+
+        function detectExamLevel(rec) {
+            const topic = String(rec.topic || '');
+            // 1. 学生端提交时写入的标记（最准确）
+            const mark = topic.match(/ECLEVEL:(cet4|cet6|tem4|tem8)/i);
+            if (mark) return mark[1].toLowerCase();
+            // 2. 老师布置任务时选的难度（按题目 + 学生匹配最新一条任务）
+            const plainTopic = cleanTopic(topic);
+            if (plainTopic) {
+                let best = null;
+                (allTasksData || []).forEach(t => {
+                    const lv = String(t.target_level || t.level || t.exam_level || '').toLowerCase();
+                    const matched = ['cet4', 'cet6', 'tem4', 'tem8'].find(l => lv === l || lv.includes(l));
+                    if (!matched) return;
+                    if (t.student_name && rec.name && t.student_name !== rec.name) return;
+                    if (cleanTopic(t.topic) !== plainTopic) return;
+                    if (!best || (t.id || 0) > (best.id || 0)) best = { id: t.id, level: matched };
+                });
+                if (best) return best.level;
+            }
+            // 3. 从批改报告里识别考试目标
+            const feedback = String(rec.feedback || '');
+            if (/专八|TEM-?8|TEM 8/i.test(feedback)) return 'tem8';
+            if (/专四|TEM-?4|TEM 4/i.test(feedback)) return 'tem4';
+            if (/六级|CET-?6|CET 6/i.test(feedback)) return 'cet6';
+            if (/四级|CET-?4|CET 4/i.test(feedback)) return 'cet4';
+            return '';
+        }
+
+        function escapeAttr(str) {
+            return escapeHtml(str).replace(/\n/g, ' ');
+        }
+
+        function buildRecordTags(rec, typeStr) {
+            const mode = rec.mode === 'translation' ? 'translation' : 'writing';
+            const level = detectExamLevel(rec);
+            let html = `<span class="tag tag-${mode}">${typeStr}</span>`;
+            html += level
+                ? `<span class="tag tag-level">${LEVEL_LABELS[level]}</span>`
+                : `<span class="tag tag-level unknown">难度未记录</span>`;
+            html += rec.is_assigned
+                ? `<span class="tag tag-assigned">🎯 老师布置</span>`
+                : `<span class="tag tag-free">自由练习</span>`;
+            return html;
+        }
+
+        function showSingleRecord(rec) {
+            const scoreObj = extractScore(rec.feedback);
+            const scoreStr = scoreObj ? `${scoreObj.score}/${scoreObj.fullScore}` : '得分未知';
+            
+            document.getElementById('single-record-title').innerText = `${rec.name} - ${formatTime(rec.created_at)}`;
+            document.getElementById('single-record-content').innerHTML = `
+                <div class="history-item-tags" style="margin-bottom:14px;">${buildRecordTags(rec, rec.mode === 'translation' ? '翻译' : '写作')}</div>
+                <div style="font-weight:800; font-size:18px; margin-bottom:10px;">得分：${scoreStr}</div>
+                <div style="color:#666; margin-bottom:20px;">📌 题目：${escapeHtml(cleanTopic(rec.topic))}</div>
+                <div style="background:#f8f9fa; padding:15px; border-radius:12px; white-space:pre-wrap; word-break:break-word;">${escapeHtml(rec.original)}</div>
+            `;
+            document.getElementById('single-record-modal').style.display = 'flex';
+        }
+
+        function closeSingleRecordModal() {
+            document.getElementById('single-record-modal').style.display = 'none';
+        }
+
+        function drawChart(canvasId, records, mode) {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) return;
+            
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+            if(rect.width === 0) return;
+            
+            canvas.width = rect.width * dpr; canvas.height = rect.height * dpr;
+            const ctx = canvas.getContext('2d');
+            ctx.scale(dpr, dpr);
+            
+            const w = rect.width, h = rect.height, padding = 30;
+            
+            const dataPoints = [];
+            records.forEach(r => {
+                const s = extractScore(r.feedback);
+                if (s) dataPoints.push({ percent: (s.score / s.fullScore) * 100, rawRecord: r });
+            });
+            
+            if (dataPoints.length < 2) {
+                ctx.fillStyle = '#8e8e93'; ctx.font = '13px -apple-system'; ctx.textAlign = 'center';
+                ctx.fillText('练习次数不足，无法生成趋势图', w/2, h/2);
+                return;
+            }
+
+            const xStep = (w - padding * 2) / (dataPoints.length - 1);
+            
+            ctx.strokeStyle = 'rgba(0,0,0,0.05)'; ctx.lineWidth = 1;
+            for(let i=0; i<=4; i++) {
+                const y = padding + (h - padding*2) * (i/4);
+                ctx.beginPath(); ctx.moveTo(padding, y); ctx.lineTo(w - padding, y); ctx.stroke();
+            }
+
+            ctx.beginPath();
+            const getY = (p) => h - padding - (p / 100) * (h - padding*2);
+            
+            ctx.moveTo(padding, getY(dataPoints[0].percent));
+            dataPoints.forEach((pt, i) => {
+                if (i === 0) return;
+                ctx.lineTo(padding + i * xStep, getY(pt.percent));
+            });
+
+            ctx.strokeStyle = '#34c759'; ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.stroke();
+
+            ctx.lineTo(w - padding, h - padding); ctx.lineTo(padding, h - padding); ctx.closePath();
+            const gradient = ctx.createLinearGradient(0, padding, 0, h - padding);
+            gradient.addColorStop(0, 'rgba(52, 199, 89, 0.2)');
+            gradient.addColorStop(1, 'rgba(52, 199, 89, 0)');
+            ctx.fillStyle = gradient; ctx.fill();
+
+            const pointsCoords = [];
+            dataPoints.forEach((pt, i) => {
+                const x = padding + i * xStep;
+                const y = getY(pt.percent);
+                pointsCoords.push({ x, y, pt });
+                
+                ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2);
+                ctx.fillStyle = '#000'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+            });
+
+            canvas.onclick = function(e) {
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                const canvasRect = canvas.getBoundingClientRect();
+                const mouseX = clientX - canvasRect.left;
+                const mouseY = clientY - canvasRect.top;
+
+                let closest = null;
+                let minDist = 40; 
+
+                pointsCoords.forEach(coord => {
+                    const dist = Math.sqrt((mouseX - coord.x)**2 + (mouseY - coord.y)**2);
+                    if (dist < minDist) { minDist = dist; closest = coord; }
+                });
+
+                if (closest) {
+                    showSingleRecord(closest.pt.rawRecord);
+                }
+            };
+        }
+
+        // ================= 学生名册：把“登录过但没交作业”的同学也显示出来 =================
+        let rosterNames = [];       // 云端绑定记录里的名字
+        let rosterKeys = {};        // 名字 -> Key 指纹数组
+        let rosterLoadedAt = 0;
+
+        async function loadRoster(force = false) {
+            if (!supabaseClient) return;
+            if (!force && Date.now() - rosterLoadedAt < 15000) return;
+            const { data, error } = await sbCall(c => c
+                .from('english_coach')
+                .select('name, topic')
+                .eq('mode', 'system_config')
+                .order('id', { ascending: true })
+                .limit(2000));
+            if (error) return;
+            const names = new Set();
+            const keys = {};
+            (data || []).forEach(r => {
+                const n = normalizeName(r.name);
+                const k = String(r.topic || '').trim();
+                if (!n) return;
+                names.add(n);
+                if (k.startsWith('key_')) {
+                    if (!keys[n]) keys[n] = [];
+                    if (!keys[n].includes(k)) keys[n].push(k);
+                }
+            });
+            rosterNames = [...names];
+            rosterKeys = keys;
+            rosterLoadedAt = Date.now();
+            bindRecordsLoaded = false; // 让姓名下拉下次重新取最新建位
+            // 名册变了以后，姓名下拉和“多个 Key”提示也要跟着更新
+            if (typeof allStudentNames !== 'undefined') {
+                allStudentNames = [...new Set([...names, ...allRecords.map(r => normalizeName(r.name)).filter(Boolean)])]
+                    .sort((a, b) => a.localeCompare(b, 'zh-CN'));
+            }
+        }
+
+        function getStudentEntries() {
+            const map = {};
+            rosterNames.forEach(n => {
+                map[n] = { name: n, records: [], keys: rosterKeys[n] || [] };
+            });
+            allRecords.filter(r => !deletedIds.has(r.id)).forEach(rec => {
+                const n = normalizeName(rec.name);
+                if (!map[n]) map[n] = { name: n, records: [], keys: rosterKeys[n] || [] };
+                map[n].records.push(rec);
+            });
+            Object.values(map).forEach(e => {
+                e.records.sort((a, b) => (a.id || 0) - (b.id || 0));
+                e.latest = e.records.length ? e.records[e.records.length - 1] : null;
+            });
+            return Object.values(map).sort((a, b) => {
+                if (a.latest && b.latest) return (b.latest.id || 0) - (a.latest.id || 0);
+                if (a.latest) return -1;
+                if (b.latest) return 1;
+                return a.name.localeCompare(b.name, 'zh-CN');
+            });
+        }
+
+        function renderHome() {
+            homeGrid.innerHTML = '';
+            const entries = getStudentEntries();
+
+            entries.forEach(entry => {
+                const item = entry.latest;
+                const card = document.createElement('div');
+                card.className = 'student-card';
+                card.onclick = () => openDetailModal(entry.name);
+
+                let timeText = '尚未提交作业';
+                let tagHtml = '';
+                if (item) {
+                    const mode = item.mode || 'writing';
+                    const tagMode = mode === 'writing' ? '<span class="tag tag-writing">写作</span>' : '<span class="tag tag-translation">翻译</span>';
+                    const tagSource = item.is_assigned ? '<span class="tag tag-assigned">🎯 老师布置</span>' : '<span class="tag tag-free">自由练习</span>';
+                    const level = detectExamLevel(item);
+                    const tagLevel = level
+                        ? `<span class="tag tag-level">${LEVEL_LABELS[level]}</span>`
+                        : `<span class="tag tag-level unknown">难度未记录</span>`;
+                    timeText = formatTime(item.created_at);
+                    tagHtml = `${tagMode}${tagLevel}${tagSource}`;
+                } else {
+                    tagHtml = '<span class="tag tag-free">账号已绑定 · 未交作业</span>';
+                }
+
+                // 同一名字下挂了多个 Key：提示“可能是一个人开了多个身份”
+                const dupHint = entry.keys.length > 1
+                    ? `<span class="tag" style="background:rgba(255,157,0,0.12); color:#e08600;">${entry.keys.length} 个 Key</span>`
+                    : '';
+
+                card.innerHTML = `
+                    <div class="avatar">${escapeHtml(entry.name.charAt(0).toUpperCase())}</div>
+                    <div class="info">
+                        <div class="info-name">
+                            ${escapeHtml(entry.name)}
+                            <span class="info-time">${item ? timeText : '尚未提交作业'}</span>
+                        </div>
+                        <div class="tag-row">
+                            ${tagHtml}
+                            ${dupHint}
+                        </div>
+                    </div>
+                `;
+                homeGrid.appendChild(card);
+            });
+
+            const submitted = entries.filter(e => e.latest).length;
+            totalCount.innerText = `${submitted} 人已交 · ${entries.length} 个账号`;
+        }
+
+        function openDetailModal(studentName) {
+            currentDetailStudent = studentName;
+            document.getElementById('detail-name').innerText = `👤 ${studentName} 的学情档案`;
+            filterHistory('all');
+            
+            document.getElementById('date-start').value = '';
+            document.getElementById('date-end').value = '';
+
+            document.getElementById('detail-modal').style.display = 'flex';
+
+            setTimeout(() => {
+                const records = allRecords.filter(r => r.name === studentName && !deletedIds.has(r.id)).sort((a,b) => a.id - b.id);
+                const writingRecords = records.filter(r => (r.mode || 'writing') === 'writing');
+                const translationRecords = records.filter(r => r.mode === 'translation');
+
+                renderDetailProgress(records);
+
+                document.getElementById('section-translation').style.display = translationRecords.length > 0 ? 'block' : 'none';
+                document.getElementById('wrapper-writing').parentElement.style.display = writingRecords.length > 0 ? 'block' : 'none';
+
+                // 没交过作业的新同学：图表区显示说明，而不是空白
+                if (records.length === 0) {
+                    const chartSection = document.getElementById('wrapper-writing').parentElement;
+                    chartSection.style.display = 'block';
+                    const wrapper = document.getElementById('wrapper-writing');
+                    wrapper.style.display = 'flex';
+                    wrapper.style.alignItems = 'center';
+                    wrapper.style.justifyContent = 'center';
+                    wrapper.innerHTML = `
+                        <div style="text-align:center; color:#8e8e93; font-size:14px; line-height:1.9;">
+                            该同学已绑定账号，但还没有提交过作业<br>
+                            <span style="font-size:12px;">可以在右上角【布置作业】里直接给他派任务</span>
+                        </div>`;
+                } else {
+                    const wrapper = document.getElementById('wrapper-writing');
+                    if (!wrapper.querySelector('canvas')) {
+                        wrapper.innerHTML = '<canvas id="chart-writing" class="chart-canvas"></canvas>';
+                    }
+                    if (writingRecords.length > 0) drawChart('chart-writing', writingRecords, 'writing');
+                    if (translationRecords.length > 0) drawChart('chart-translation', translationRecords, 'translation');
+                }
+            }, 100);
+        }
+
+        // 详情页顶部的“身份与进度”卡片：让学生还没交作业时也能看全信息
+        function renderDetailProgress(records) {
+            const box = document.getElementById('detail-progress');
+            if (!box) return;
+            const keys = rosterKeys[currentDetailStudent] || [];
+            const tasks = (allTasksData || []).filter(t => t.student_name === currentDetailStudent);
+            const pending = tasks.filter(t => t.status === 'pending');
+            const latest = records.length ? records[records.length - 1] : null;
+
+            const lastSubmit = latest
+                ? `最近一次：${formatTime(latest.created_at)} · ${latest.mode === 'translation' ? '翻译' : '写作'}`
+                : '还没有提交过作业';
+            const taskLine = tasks.length === 0
+                ? '老师还没有布置过任务'
+                : `共布置 ${tasks.length} 次，未完成 ${pending.length} 次`;
+
+            box.innerHTML = `
+                <div class="progress-item"><span>API Key 绑定</span><b>${keys.length ? keys.length + ' 个' : '无记录'}</b></div>
+                <div class="progress-item"><span>作业状态</span><b>${escapeHtml(lastSubmit)}</b></div>
+                <div class="progress-item"><span>任务进度</span><b>${escapeHtml(taskLine)}</b></div>
+            `;
+        }
+
+        function filterHistory(type) {
+            currentFilter = type;
+            document.getElementById('btn-filter-all').classList.remove('active');
+            document.getElementById('btn-filter-writing').classList.remove('active');
+            document.getElementById('btn-filter-translation').classList.remove('active');
+            
+            if (type === 'all') document.getElementById('btn-filter-all').classList.add('active');
+            else if (type === 'writing') document.getElementById('btn-filter-writing').classList.add('active');
+            else if (type === 'translation') document.getElementById('btn-filter-translation').classList.add('active');
+
+            renderHistoryList();
+        }
+
+        function renderHistoryList() {
+            const records = allRecords.filter(r => r.name === currentDetailStudent && !deletedIds.has(r.id)).sort((a,b) => a.id - b.id);
+            
+            const startDate = document.getElementById('date-start').value;
+            const endDate = document.getElementById('date-end').value;
+
+            let filteredRecords = records;
+            
+            if (currentFilter !== 'all') {
+                filteredRecords = filteredRecords.filter(r => (r.mode || 'writing') === currentFilter);
+            }
+            
+            if (startDate) filteredRecords = filteredRecords.filter(r => getDateStr(r.created_at) >= startDate);
+            if (endDate) filteredRecords = filteredRecords.filter(r => getDateStr(r.created_at) <= endDate);
+
+            currentFilteredRecords = [...filteredRecords].reverse();
+
+            const listContainer = document.getElementById('detail-list');
+            
+            if (filteredRecords.length === 0) {
+                listContainer.innerHTML = '<div style="text-align:center; color:#8e8e93; padding:20px;">当前筛选条件下暂无记录</div>';
+                return;
+            }
+
+            let html = '';
+            currentFilteredRecords.forEach((rec, index) => {
+                const mode = rec.mode || 'writing';
+                const scoreObj = extractScore(rec.feedback);
+                const scoreStr = scoreObj ? `${scoreObj.score}/${scoreObj.fullScore}` : '得分未知';
+                const typeStr = mode === 'writing' ? '写作' : '翻译';
+                const safeRec = escapeAttr(JSON.stringify(rec));
+                
+                html += `
+                    <div class="history-item" data-rec="${safeRec}" onclick="openSingleRecord(JSON.parse(this.dataset.rec))" style="cursor: pointer;">
+                        <button class="detail-delete-btn" onclick="event.stopPropagation(); deleteRecord(${rec.id})" title="删除记录">×</button>
+                        <div class="history-item-header">
+                            <span>第 ${currentFilteredRecords.length - index} 次提交</span>
+                            <span>${formatTime(rec.created_at)} | 得分：${scoreStr}</span>
+                        </div>
+                        <div class="history-item-tags">${buildRecordTags(rec, typeStr)}</div>
+                        <div class="history-item-topic">📌 题目：${escapeHtml(cleanTopic(rec.topic)) || '未填写'}</div>
+                        <div class="history-item-original">${escapeHtml(rec.original)}</div>
+                    </div>
+                `;
+            });
+            listContainer.innerHTML = html;
+        }
+
+        function exportCurrentData() {
+            if (!currentFilteredRecords || currentFilteredRecords.length === 0) {
+                return alert('当前没有数据可以导出哦！');
+            }
+            const headers = ["学生姓名", "提交时间", "练习类型", "难度层级", "是否布置", "题目", "得分", "学生原文"];
+            const rows = currentFilteredRecords.map(rec => {
+                const scoreObj = extractScore(rec.feedback);
+                const scoreStr = scoreObj ? `${scoreObj.score}/${scoreObj.fullScore}` : '未知';
+                const typeStr = rec.mode === 'translation' ? '翻译' : '写作';
+                const isAssign = rec.is_assigned ? '是' : '否';
+                const level = detectExamLevel(rec);
+                const levelStr = level ? LEVEL_LABELS[level] : '未记录';
+                const escapeCsv = (str) => {
+                    if (!str) return '""';
+                    return `"${String(str).replace(/"/g, '""')}"`;
+                };
+                return [
+                    escapeCsv(rec.name), escapeCsv(formatTime(rec.created_at)), escapeCsv(typeStr),
+                    escapeCsv(levelStr), escapeCsv(isAssign), escapeCsv(cleanTopic(rec.topic)), escapeCsv(scoreStr), escapeCsv(rec.original)
+                ].join(",");
+            });
+            const csvContent = "\uFEFF" + headers.join(",") + "\n" + rows.join("\n");
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            const dateStr = new Date().toISOString().split('T')[0];
+            link.setAttribute("download", `${currentDetailStudent}_成绩单_${dateStr}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+
+        function closeDetailModal() {
+            document.getElementById('detail-modal').style.display = 'none';
+        }
+
+        async function loadInitialData() {
+            if (!supabaseClient) return;
+            const { data, error } = await sbCall(c => c.from('english_coach').select('*').neq('mode', 'system_config').order('id', { ascending: true }));
+            if (data) {
+                allRecords = data; 
+                // 同时拉一次学生名册：没交过作业的同学也会出现在看板上
+                await loadRoster(true);
+                renderHome();
+            } else if (error) {
+                homeGrid.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:40px; color:#8e8e93;">连不上云端，正在自动重试…（请检查网络）</div>';
+                if (!pollPaused) setTimeout(loadInitialData, 8000);
+            }
+        }
+
+        // 轮询：页面在后台时跳过；失败只记录，不打断看板
+        async function pollNewData() {
+            if (!supabaseClient || pollPaused) return;
+            if (document.hidden) return;
+            if (allRecords.length === 0) { loadInitialData(); return; }
+            const lastMaxId = Math.max(...allRecords.map(r => Number(r.id) || 0));
+            let rosterChanged = false;
+            try {
+                // 名册也要轮询：新同学一登录就能立刻看到（不需要先交作业）
+                const beforeCount = rosterNames.length;
+                await loadRoster();
+                if (rosterNames.length !== beforeCount) rosterChanged = true;
+                if (rosterChanged) renderHome();
+
+                const { data, error } = await sbCall(c => c.from('english_coach').select('*').gt('id', lastMaxId).order('id', { ascending: true }), 2);
+                if (error) throw error;
+                if (data && data.length > 0) {
+                    let hasNew = false;
+                    data.forEach(item => {
+                        if (item.mode === 'system_config') return; // 新同学只进入名册，不当作答卷
+                        if (!deletedIds.has(item.id) && !allRecords.some(r => r.id === item.id)) {
+                            allRecords.push(item);
+                            hasNew = true;
+                        }
+                    });
+                    if (hasNew) {
+                        renderHome(); 
+                        if (currentDetailStudent && document.getElementById('detail-modal').style.display === 'flex') {
+                            renderHistoryList();
+                        }
+                    }
+                }
+            } catch (err) {}
+        }
+
+        async function deleteRecord(id) {
+            if (!confirm('确定要删除这条记录吗？')) return;
+            if (!supabaseClient) return;
+
+            const recordToDelete = allRecords.find(r => r.id === id);
+            if (!recordToDelete) return;
+
+            const { error } = await sbCall(c => c.from('english_coach').delete().eq('id', id));
+            
+            if (error) {
+                alert('删除失败：网络没连上云端，请检查网络后重试。（技术信息：' + (error.message || '未知') + '）');
+                return;
+            }
+            
+            deletedIds.add(id);
+            allRecords = allRecords.filter(r => r.id !== id);
+            
+            renderHome();
+            if (currentDetailStudent && document.getElementById('detail-modal').style.display === 'flex') {
+                renderHistoryList();
+                const records = allRecords.filter(r => r.name === currentDetailStudent && !deletedIds.has(r.id)).sort((a,b) => a.id - b.id);
+                const writingRecords = records.filter(r => (r.mode || 'writing') === 'writing');
+                const translationRecords = records.filter(r => r.mode === 'translation');
+                if (writingRecords.length > 0) drawChart('chart-writing', writingRecords, 'writing');
+                if (translationRecords.length > 0) drawChart('chart-translation', translationRecords, 'translation');
+            }
+
+            lastDeletedRecord = recordToDelete;
+            const toast = document.getElementById('undo-toast');
+            toast.classList.add('show');
+            
+            if (toastTimeout) clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => { lastDeletedRecord = null; }, 300); 
+            }, 6000);
+        }
+
+        async function undoDelete() {
+            if (!lastDeletedRecord || !supabaseClient) return;
+
+            const toast = document.getElementById('undo-toast');
+            toast.classList.remove('show');
+            if (toastTimeout) clearTimeout(toastTimeout);
+
+            const dataToInsert = { ...lastDeletedRecord };
+            delete dataToInsert.id; 
+
+            const { data, error } = await sbCall(c => c.from('english_coach').insert([dataToInsert]).select());
+
+            if (error) {
+                alert('撤销失败：网络没连上云端，请检查网络后重试。（技术信息：' + (error.message || '未知') + '）');
+            } else {
+                if (data && data.length > 0) {
+                    const newRecord = data[0];
+                    deletedIds.delete(lastDeletedRecord.id); 
+                    allRecords.push(newRecord);
+                    
+                    renderHome();
+                    if (currentDetailStudent && document.getElementById('detail-modal').style.display === 'flex') {
+                        renderHistoryList();
+                    }
+                }
+            }
+            lastDeletedRecord = null;
+        }
+
+        async function clearAllData() {
+            if (!confirm('⚠️ 确定要清空所有提交记录吗？不可恢复！')) return;
+            if (!supabaseClient) return;
+
+            const { error } = await sbCall(c => c.from('english_coach').delete().neq('id', 0), 2);
+            if (error) {
+                alert('清空失败：网络没连上云端，请检查网络后重试。（技术信息：' + (error.message || '未知') + '）');
+            } else {
+                allRecords = [];
+                homeGrid.innerHTML = '';
+                totalCount.innerText = `0 人已交`;
+            }
+        }
+
+        // ================= 布置作业记录管理（带高级筛选与导出） =================
+
+        async function openTaskModal() {
+            if (!supabaseClient) return;
+            document.getElementById('task-modal').style.display = 'flex';
+            
+            document.getElementById('task-search').value = '';
+            document.getElementById('task-date-start').value = '';
+            document.getElementById('task-date-end').value = '';
+            setTaskFilter('all', false); 
+
+            const listContainer = document.getElementById('task-list');
+            listContainer.innerHTML = '<div style="text-align:center; color:#8e8e93; padding:20px;">加载中...</div>';
+
+            try {
+                const { data, error } = await sbCall(c => c
+                    .from('assigned_tasks')
+                    .select('*')
+                    .order('id', { ascending: false }));
+
+                if (error) throw error;
+                allTasksData = data || [];
+                renderTaskList();
+            } catch (error) {
+                listContainer.innerHTML = `<div style="color:#8e8e93; text-align:center; padding:20px;">加载失败：网络没连上云端，请检查网络后重新打开。<br><span style="font-size:12px;">（${escapeHtml(error.message || '未知')}）</span></div>`;
+            }
+        }
+
+        function closeTaskModal() {
+            document.getElementById('task-modal').style.display = 'none';
+        }
+
+        function setTaskFilter(mode, shouldRender = true) {
+            taskFilterMode = mode;
+            document.getElementById('btn-task-all').classList.remove('active');
+            document.getElementById('btn-task-writing').classList.remove('active');
+            document.getElementById('btn-task-translation').classList.remove('active');
+            
+            if (mode === 'all') document.getElementById('btn-task-all').classList.add('active');
+            else if (mode === 'writing') document.getElementById('btn-task-writing').classList.add('active');
+            else if (mode === 'translation') document.getElementById('btn-task-translation').classList.add('active');
+
+            if (shouldRender) renderTaskList();
+        }
+
+        function renderTaskList() {
+            const listContainer = document.getElementById('task-list');
+            
+            if (allTasksData.length === 0) {
+                listContainer.innerHTML = '<div style="text-align:center; color:#8e8e93; padding:20px;">还没有布置过任何任务哦</div>';
+                currentFilteredTasks = [];
+                return;
+            }
+
+            const keyword = document.getElementById('task-search').value.trim().toLowerCase();
+            const startDate = document.getElementById('task-date-start').value;
+            const endDate = document.getElementById('task-date-end').value;
+
+            let filteredTasks = allTasksData;
+
+            if (keyword) {
+                filteredTasks = filteredTasks.filter(t => t.student_name.toLowerCase().includes(keyword));
+            }
+
+            if (taskFilterMode !== 'all') {
+                filteredTasks = filteredTasks.filter(t => (t.mode || 'writing') === taskFilterMode);
+            }
+
+            if (startDate) {
+                filteredTasks = filteredTasks.filter(t => getDateStr(t.created_at) >= startDate);
+            }
+            if (endDate) {
+                filteredTasks = filteredTasks.filter(t => getDateStr(t.created_at) <= endDate);
+            }
+
+            currentFilteredTasks = filteredTasks; // 保存当前筛选结果用于导出
+
+            if (filteredTasks.length === 0) {
+                listContainer.innerHTML = '<div style="text-align:center; color:#8e8e93; padding:20px;">没有符合筛选条件的任务记录</div>';
+                return;
+            }
+
+            let html = '';
+            filteredTasks.forEach(task => {
+                const isPending = task.status === 'pending';
+                const statusBadge = isPending 
+                    ? '<span class="status-badge status-pending">待完成</span>' 
+                    : '<span class="status-badge status-completed">已完成</span>';
+                const modeStr = task.mode === 'translation' ? '翻译' : '写作';
+                const taskLevel = detectExamLevel({ topic: task.topic, feedback: '', name: task.student_name });
+                const levelTag = taskLevel
+                    ? `<span class="tag tag-level">${LEVEL_LABELS[taskLevel]}</span>`
+                    : `<span class="tag tag-level unknown">难度未记录</span>`;
+                
+                html += `
+                    <div class="task-item">
+                        <div class="task-info">
+                            <div class="task-title">${escapeHtml(task.student_name)} - ${modeStr}任务</div>
+                            <div class="task-meta">
+                                ${statusBadge}
+                                ${levelTag}
+                                <span>📅 ${formatTime(task.created_at)}</span>
+                            </div>
+                            <div style="margin-top: 8px; font-size: 14px; color: #444; background: #f8f9fa; padding: 8px 12px; border-radius: 8px; white-space: pre-wrap; word-break: break-word;">
+                                ${escapeHtml(cleanTopic(task.topic))}
+                            </div>
+                        </div>
+                        <button class="task-delete-btn" onclick="deleteTask(${task.id})" title="删除该任务">×</button>
+                    </div>
+                `;
+            });
+            listContainer.innerHTML = html;
+        }
+
+        // 新增：导出任务记录为 CSV
+        function exportTasksData() {
+            if (!currentFilteredTasks || currentFilteredTasks.length === 0) {
+                return alert('当前没有符合筛选条件的任务记录可以导出哦！');
+            }
+            
+            const headers = ["学生姓名", "布置时间", "任务类型", "难度层级", "完成状态", "题目内容"];
+            const rows = currentFilteredTasks.map(task => {
+                const modeStr = task.mode === 'translation' ? '翻译' : '写作';
+                const statusStr = task.status === 'pending' ? '待完成' : '已完成';
+                const timeStr = new Date(task.created_at).toLocaleString('zh-CN', { hour12: false });
+                const taskLevel = detectExamLevel({ topic: task.topic, feedback: '', name: task.student_name });
+                
+                const escapeCsv = (str) => {
+                    if (!str) return '""';
+                    return `"${String(str).replace(/"/g, '""')}"`;
+                };
+                
+                return [
+                    escapeCsv(task.student_name),
+                    escapeCsv(timeStr),
+                    escapeCsv(modeStr),
+                    escapeCsv(taskLevel ? LEVEL_LABELS[taskLevel] : '未记录'),
+                    escapeCsv(statusStr),
+                    escapeCsv(cleanTopic(task.topic))
+                ].join(",");
+            });
+            
+            const csvContent = "\uFEFF" + headers.join(",") + "\n" + rows.join("\n");
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            const dateStr = new Date().toISOString().split('T')[0];
+            link.setAttribute("download", `布置任务记录_${dateStr}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+
+        async function deleteTask(id) {
+            if (!confirm('确定要撤回/删除这个任务吗？学生将无法再看到它。')) return;
+            if (!supabaseClient) return;
+
+            const { error } = await sbCall(c => c.from('assigned_tasks').delete().eq('id', id));
+            if (error) {
+                alert('删除失败：网络没连上云端，请检查网络后重试。（技术信息：' + (error.message || '未知') + '）');
+            } else {
+                openTaskModal(); 
+            }
+        }
+
+        // ================= 发布任务 =================
+        function openAssignModal() { 
+            document.getElementById('assign-modal').style.display = 'flex'; 
+            document.getElementById('assign-mode-writing').checked = true;
+            document.getElementById('assign-name').value = '';
+            document.getElementById('assign-topic').value = '';
+            hideAssignSuggest();
+            fetchStudentNames(); // 顺便刷新云端学生名单
+            // 默认难度：四级；选了学生后会自动带入该学生上一次的难度
+            setLevelBubble('cet4');
+        }
+        function closeAssignModal() { 
+            document.getElementById('assign-modal').style.display = 'none'; 
+            hideAssignSuggest();
+            document.getElementById('assign-name').value = '';
+            document.getElementById('assign-topic').value = '';
+        }
+
+        // ---------- 学生姓名下拉：从云端绑定记录 + 历史答卷里取名单，防止手动输入对不上 ----------
+        let allStudentNames = [];
+        let nameKeyMap = {};   // 姓名 -> 绑定 Key 指纹
+        let keyNameMap = {};   // 绑定 Key 指纹 -> 姓名
+        let bindRecordsLoaded = false;
+
+        function normalizeName(str) {
+            return String(str == null ? '' : str)
+                .replace(/\u3000/g, ' ')
+                .replace(/[\u200B-\u200D\uFEFF]/g, '')
+                .trim();
+        }
+
+        // 载入“Key 指纹 → 姓名”的全部绑定记录（学生换 Key 或改名的关键对照表）
+        async function loadBindingRecords(force = false) {
+            if (!supabaseClient) return;
+            if (bindRecordsLoaded && !force) return;
+            const { data, error } = await sbCall(c => c
+                .from('english_coach')
+                .select('name, topic')
+                .eq('mode', 'system_config')
+                .order('id', { ascending: true })
+                .limit(2000));
+            if (error || !data) return;
+            nameKeyMap = {}; keyNameMap = {};
+            data.forEach(r => {
+                const n = normalizeName(r.name);
+                const k = String(r.topic || '').trim();   // 形如 key_xxxxxxxxxx
+                if (!n) return;
+                if (k.startsWith('key_')) keyNameMap[k] = n;
+                if (!nameKeyMap[n]) nameKeyMap[n] = [];
+                if (k.startsWith('key_') && !nameKeyMap[n].includes(k)) nameKeyMap[n].push(k);
+            });
+            bindRecordsLoaded = true;
+        }
+
+        async function fetchStudentNames(silent = true) {
+            if (!supabaseClient) return;
+            try {
+                await loadBindingRecords(true);
+                let names = Object.keys(nameKeyMap);
+                // 来源 2：已有答卷的姓名（防止绑定记录被清空后名单丢失）
+                allRecords.forEach(r => { if (r.name) names.push(normalizeName(r.name)); });
+                allStudentNames = [...new Set(names)].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+            } catch (e) {
+                allStudentNames = [...new Set(allRecords.map(r => normalizeName(r.name)).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+                if (!silent) alert('学生名单刷新失败，已改用看板上已有的姓名。\n请检查网络后重试。');
+            }
+            renderSuggest();
+            refreshPendingHint();
+        }
+
+        function onAssignNameFocus() { 
+            fetchStudentNames(); 
+            renderSuggest(); 
+        }
+
+        function onAssignNameInput() {
+            renderSuggest();
+            hidePendingHint();
+        }
+
+        function renderSuggest() {
+            const box = document.getElementById('assign-suggest');
+            if (!box) return;
+            const keyword = document.getElementById('assign-name').value.trim().toLowerCase();
+            const matches = keyword
+                ? allStudentNames.filter(n => n.toLowerCase().includes(keyword))
+                : allStudentNames;
+
+            if (matches.length === 0) {
+                box.innerHTML = `<div class="dropdown-empty">${allStudentNames.length === 0 ? '云端暂无学生名单，学生首次登录后会出现在这里' : '没有匹配的学生，可直接手动输入完整姓名'}</div>`;
+                box.classList.add('show');
+                return;
+            }
+
+            box.innerHTML = matches.slice(0, 50).map(n =>
+                `<div class="dropdown-item" onmousedown="pickAssignName(this)" data-name="${escapeAttr(n)}">
+                    <span>${escapeHtml(n)}</span>
+                </div>`
+            ).join('');
+            box.classList.add('show');
+        }
+
+        function pickAssignName(el) {
+            const name = el.getAttribute('data-name');
+            document.getElementById('assign-name').value = name;
+            hideAssignSuggest();
+            refreshPendingHint();
+            autoFillLevelFor(name);
+        }
+
+        // 选择学生后，自动带入他最近一次任务用的难度，省得每次重选
+        function autoFillLevelFor(name) {
+            const lvEl = document.getElementById('assign-level');
+            if (!lvEl) return;
+            let latest = null;
+            (allTasksData || []).forEach(t => {
+                if (t.student_name !== name) return;
+                const raw = String(t.target_level || '').toLowerCase();
+                let matched = ['cet4', 'cet6', 'tem4', 'tem8'].find(l => raw === l);
+                if (!matched) {
+                    const m = String(t.topic || '').match(/ECLEVEL:(cet4|cet6|tem4|tem8)/i);
+                    if (m) matched = m[1].toLowerCase();
+                }
+                if (matched && (!latest || (t.id || 0) > (latest.id || 0))) latest = { id: t.id, level: matched };
+            });
+            if (latest) setLevelBubble(latest.level);
+        }
+
+        // ---------- 难度气泡：点击选中，隐藏的 select 仍是唯一数据源 ----------
+        function setLevelBubble(level) {
+            const lvEl = document.getElementById('assign-level');
+            if (!lvEl) return;
+            lvEl.value = level || '';
+            document.querySelectorAll('#assign-level-row .bubble').forEach(b => {
+                b.classList.toggle('active', (b.getAttribute('data-level') || '') === (level || ''));
+            });
+        }
+
+        function pickLevel(el) {
+            const level = el.getAttribute('data-level') || '';
+            setLevelBubble(level);
+            const row = document.getElementById('assign-level-row');
+            row.classList.remove('shake');
+            void row.offsetWidth;
+            row.classList.add('shake');
+        }
+
+        function hideAssignSuggest() {
+            const box = document.getElementById('assign-suggest');
+            if (box) box.classList.remove('show');
+        }
+
+        document.addEventListener('mousedown', function(e) {
+            const field = document.querySelector('.assign-field');
+            if (field && !field.contains(e.target)) hideAssignSuggest();
+        });
+
+        // 选了学生后，提示他手上是否还有没做完的任务
+        function refreshPendingHint() {
+            const name = document.getElementById('assign-name').value.trim();
+            hidePendingHint();
+            if (!name || !allTasksData || allTasksData.length === 0) return;
+            const pendingCount = allTasksData.filter(t => t.student_name === name && t.status === 'pending').length;
+            if (pendingCount > 0) {
+                const topicEl = document.getElementById('assign-topic');
+                topicEl.placeholder = `⚠️ 该同学还有 ${pendingCount} 个待完成任务，再次布置会叠加`;
+                topicEl.style.borderColor = 'rgba(255,157,0,0.6)';
+            }
+        }
+        function hidePendingHint() {
+            const topicEl = document.getElementById('assign-topic');
+            topicEl.placeholder = '输入要布置的题目或原文段落...';
+            topicEl.style.borderColor = '#ddd';
+        }
+
+        function escapeHtml(str) {
+            return String(str == null ? '' : str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        async function submitTask() {
+            let name = normalizeName(document.getElementById('assign-name').value);
+            const topic = document.getElementById('assign-topic').value.trim();
+            const mode = document.querySelector('input[name="assignMode"]:checked').value;
+            
+            if (!name || !topic) return alert('请填写完整的学生姓名和题目！');
+            if (!supabaseClient) return alert('网络组件加载失败，请刷新页面后重试！');
+
+            const btn = document.getElementById('assign-submit-btn');
+            btn.disabled = true; btn.innerText = "校验学生...";
+
+            try {
+                // 布置前强制刷新一次名单，避免“刚用新 Key 登录的同学”还没进名单
+                await fetchStudentNames(true);
+                await loadBindingRecords(true);
+
+                // ① 核对姓名：带尾随空格、全角空格、看不见的字符时自动对齐成云端真实名字
+                if (allStudentNames.length > 0 && !allStudentNames.includes(name)) {
+                    const fixed = allStudentNames.find(n => normalizeName(n) === name);
+                    if (fixed) {
+                        name = fixed;
+                    } else {
+                        const ok = confirm(`云端名单里没有【${name}】这个名字。\n\n如果写法和学生那边不一样，他将看不到这条任务。\n\n确定要按这个名字布置吗？`);
+                        if (!ok) { btn.disabled = false; btn.innerText = "发布任务"; return; }
+                    }
+                }
+
+                // ② 关键校验：这个名字背后到底有几个 Key（多个 = 这位同学换过 Key 或用过别人的 Key）
+                const keys = nameKeyMap[name] || [];
+                if (keys.length > 1) {
+                    const distinctNames = [...new Set(keys.map(k => keyNameMap[k] || '未知'))];
+                    const detail = distinctNames.map(n => `· ${n}`).join('\n');
+                    const go = confirm(
+                        `注意：名字【${name}】下绑定过 ${keys.length} 个 API Key，在系统里其实是这些身份：\n\n${detail}\n\n` +
+                        `如果这位同学刚换了新 Key 登录，老师这边很可能已经把他当成另一个人了，` +
+                        `按【${name}】布置，他的新身份可能收不到。\n\n` +
+                        `建议先去【布置记录】里找到他的名字确认一下。\n\n仍要按【${name}】布置吗？`
+                    );
+                    if (!go) { btn.disabled = false; btn.innerText = "发布任务"; return; }
+                }
+
+                btn.innerText = "发布中...";
+
+                const row = {
+                    student_name: name,
+                    topic: topic,
+                    mode: mode,
+                    status: 'pending'
+                };
+                // 难度标记直接写进题目末尾（不新增数据库字段）；若表里已有难度类字段则一并写入
+                const levelValue = (document.getElementById('assign-level') || {}).value || '';
+                if (levelValue) row.topic = `${topic}\nECLEVEL:${levelValue}`;
+
+                const existsTask = async () => {
+                    const r = await sbCall(c => c.from('assigned_tasks')
+                        .select('id')
+                        .eq('student_name', name)
+                        .eq('topic', row.topic)
+                        .eq('mode', mode)
+                        .eq('status', 'pending')
+                        .limit(1), 2);
+                    return r.error ? null : (Array.isArray(r.data) && r.data.length > 0);
+                };
+
+                let inserted = null;
+                if (levelValue) {
+                    // 先尝试带 target_level 字段插入（你以后若加了这一列会自动用上）
+                    const first = await sbCall(c => c.from('assigned_tasks').insert([{ ...row, target_level: levelValue }]).select(), 3, { nonIdempotent: true, exists: existsTask });
+                    if (first.error) {
+                        const msg = String(first.error.message || '');
+                        if (/failed to fetch|network|econnreset|timeout/i.test(msg)) throw new Error(msg);
+                        // 表里没有这一列时，退回只用题目标记，保证照样能布置
+                        const retry = await sbCall(c => c.from('assigned_tasks').insert([row]).select(), 3, { nonIdempotent: true, exists: existsTask });
+                        if (retry.error) throw new Error(retry.error.message || first.error.message);
+                        inserted = retry.data;
+                    } else {
+                        inserted = first.data;
+                    }
+                } else {
+                    const res = await sbCall(c => c.from('assigned_tasks').insert([row]).select(), 3, { nonIdempotent: true, exists: existsTask });
+                    if (res.error) throw new Error(res.error.message);
+                    inserted = res.data;
+                }
+                if (inserted && inserted.length) {
+                    // 拿到完整记录（含数据库真实字段），历史记录能直接识别难度
+                    allTasksData.unshift(inserted[0]);
+                }
+
+                const modeStr = mode === 'writing' ? '写作' : '翻译';
+                const levelStr = LEVEL_LABELS[levelValue] || '';
+                alert(`✅ 已成功为【${name}】布置了${levelStr} ${modeStr}任务！\n\n他下次输入 API Key 登录后会自动弹出这条任务。`);
+                closeAssignModal();
+            } catch (error) {
+                alert('发布失败：网络没连上云端，请检查网络后重试。\n\n（技术信息：' + (error.message || '未知错误') + '）');
+            } finally {
+                btn.disabled = false; btn.innerText = "发布任务";
+            }
+        }
+
+        function filterCards() {
+            const keyword = document.getElementById('search-input').value.trim().toLowerCase();
+            document.querySelectorAll('.student-card').forEach(card => {
+                const name = card.querySelector('.info-name').innerText.split('\n')[0].toLowerCase();
+                card.style.display = name.includes(keyword) ? 'flex' : 'none';
+            });
+        }
+
+        loadInitialData().then(() => {
+            if (pollTimer) clearInterval(pollTimer);
+            pollTimer = setInterval(pollNewData, 3000);
+        });
+    </script>
+</body>
+</html>
