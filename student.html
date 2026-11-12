@@ -10,7 +10,7 @@
     
     <script>
         // 页面版本号：改代码时一起改，用来确认学生打开的到底是不是最新版
-        window.__APP_VERSION__ = '2026-11-11.6';
+        window.__APP_VERSION__ = '2026-11-12.1';
         marked.setOptions({ breaks: true, gfm: true });
         window.onload = function() {
             var v = document.getElementById('app-version');
@@ -226,9 +226,12 @@
 
         <!-- 自由练习/任务配置表单 -->
         <div class="card setup-area" id="setup-panel" style="display: none;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                <h3 style="font-size: 18px; font-weight: 800;" id="welcome-msg">练习设置</h3>
-                <button class="btn btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="logout()">换人</button>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; gap: 10px;">
+                <div style="min-width: 0;">
+                    <h3 style="font-size: 18px; font-weight: 800;" id="welcome-msg">练习设置</h3>
+                    <p id="name-hint" style="font-size: 12px; color: var(--text-muted); margin-top: 2px; display: none;"></p>
+                </div>
+                <button class="btn btn-secondary" style="padding: 4px 12px; font-size: 12px; flex-shrink: 0;" onclick="logout()">换人</button>
             </div>
 
             <div class="segmented-control mode-toggle">
@@ -976,8 +979,7 @@
                     // 这个 Key 已经绑定过账号
                     studentName = bindData.name;
                     // 同一个人可能填过不同名字（例如第一次多加了个空格），提示一下
-                    if (inputName && inputName !== bindData.name) {
-                        alert(
+                    if (inputName && inputName !== bindData.name) {                        alert(
                             `这个 API Key 之前已经绑定在【${bindData.name}】名下。\n\n` +
                             `你在姓名栏写的是【${inputName}】，系统会继续按【${bindData.name}】记录你的成绩，` +
                             `这样历史记录和老师布置的任务都不会丢。\n\n` +
@@ -994,24 +996,31 @@
                         return alert("检测到新 Key，请在上方输入你的姓名进行绑定！");
                     }
 
-                    // 检查重名
+                    // 检查重名：在云端查这个名字是否已经被其他 Key 占用
                     let finalName = inputName;
                     const namesRes = await sbCall('重名查询', c => c
                         .from('english_coach')
-                        .select('name')
-                        .eq('mode', 'system_config'));
+                        .select('name, topic')
+                        .eq('mode', 'system_config')
+                        .order('id', { ascending: false })
+                        .limit(2000), 3);
                     const existingConfigs = namesRes.data;
 
                     if (existingConfigs && existingConfigs.length > 0) {
-                        const existingNames = existingConfigs.map(c => c.name);
+                        // 只统计“属于其他 Key”的同名绑定，同一个 Key 重复绑定不算重名
+                        const takenNames = new Set(
+                            existingConfigs
+                                .filter(c => String(c.topic || '') !== configTopic)
+                                .map(c => String(c.name == null ? '' : c.name).trim())
+                        );
                         let counter = 1;
-                        // 如果存在重名，加后缀
-                        while (existingNames.includes(finalName)) {
+                        while (takenNames.has(finalName)) {
                             counter++;
                             finalName = `${inputName} (${counter})`;
                         }
                         if (finalName !== inputName) {
                             alert(`系统检测到已有同学使用【${inputName}】，为了区分，将自动为您分配名字：【${finalName}】`);
+                            window.__nameHint = `已有同名同学，你的账号名是【${finalName}】`;
                         }
                     }
 
@@ -1027,7 +1036,7 @@
                         feedback: 'BINDING_RECORD',
                         created_at: new Date().toISOString()
                     };
-                    await sbCall('绑定写入', c => c.from('english_coach').insert([bindingRow]), 3, {
+                    const writeRes = await sbCall('绑定写入', c => c.from('english_coach').insert([bindingRow]), 3, {
                         nonIdempotent: true,
                         exists: async () => {
                             const r = await sbCall('绑定确认', c => c.from('english_coach')
@@ -1039,6 +1048,11 @@
                         }
                     });
 
+                    // 已确认写入成功后，把成功的名字记下来；如果后面回查失败，用它兜底，绝不让学生已绑好却报错
+                    if (!writeRes.error) {
+                        window.__boundName = studentName;
+                    }
+
                     // 最终确认：云端真的查得到这个 Key 的绑定才继续
                     // 注意：这里按 Key 查，而不是按“名字”查——两人同时用同一个 Key 时，
                     // 先写进去的那个人就是正式身份，后一个会自动沿用，不会卡死在“绑定失败”。
@@ -1046,24 +1060,29 @@
                         .select('name')
                         .eq('mode', 'system_config')
                         .eq('topic', configTopic)
-                        .limit(1)
-                        .maybeSingle(), 2);
+                        .order('id', { ascending: true })
+                        .limit(1), 2);
 
-                    if (bindCheck.error) {
+                    if (bindCheck.error || !Array.isArray(bindCheck.data) || bindCheck.data.length === 0) {
+                        // 写入本身已确认成功：只是回查没成功，直接放行，避免“其实绑好了却提示失败”
+                        if (window.__boundName === studentName) {
+                            document.getElementById('welcome-msg').innerText = `欢迎新同学，${studentName}`;
+                            await checkTaskAndProceed();
+                            return;
+                        }
                         // 连不上查询：先放行，等交作业时会再校验
-                        await checkTaskAndProceed();
-                        return;
-                    }
-
-                    if (!bindCheck.data) {
+                        if (bindCheck.error) {
+                            await checkTaskAndProceed();
+                            return;
+                        }
                         btn.disabled = false;
                         btn.innerText = "验证并进入";
                         return alert("这台设备没把账号信息同步到云端（网络被拦截了一次）。\n\n请再点一次【验证并进入】，或换一个网络后重试。\n\n如果一直不行，请把这句话发给老师：新 Key 绑定失败。");
                     }
 
                     // 云端已有的名字才是正式身份；如果和本地打算用的不一样，说明这个 Key 刚被别人占用
-                    const cloudName = bindCheck.data.name;
-                    if (cloudName !== studentName) {
+                    const cloudName = bindCheck.data[0].name;
+                    if (cloudName && cloudName !== studentName) {
                         studentName = cloudName;
                         alert(
                             `刚刚有另一台设备也用了同一个 Key 登录，系统已经把它记在【${cloudName}】名下。\n\n` +
@@ -1074,6 +1093,7 @@
                     // bound === null 表示连不上查询：先让学生进去，稍后提交时会再校验
 
                     document.getElementById('welcome-msg').innerText = `欢迎新同学，${studentName}`;
+                    showNameHint(window.__nameHint);
                     await checkTaskAndProceed();
                 }
             } catch (e) {
@@ -1086,6 +1106,19 @@
                 } else {
                     alert("识别失败，请检查网络或 API Key 是否正确。");
                 }
+            }
+        }
+
+        // 在设置页显示“你的账号名是什么”，改了名也能一眼看到
+        function showNameHint(text) {
+            const el = document.getElementById('name-hint');
+            if (!el) return;
+            if (text) {
+                el.innerText = text;
+                el.style.display = 'block';
+            } else {
+                el.innerText = '';
+                el.style.display = 'none';
             }
         }
 
@@ -1362,11 +1395,26 @@
             }
         }
 
+        // 提交锁：一次只允许一个提交在跑。连点十次只会执行一次，不重复消耗 AI 额度、不重复入库
+        let isSubmitting = false;
+
         async function submitAnswer() {
             const submitBtnCheck = document.getElementById('submit-btn');
+
+            // 防连点：正在处理中，直接忽略后续点击
+            if (isSubmitting) {
+                submitBtnCheck.innerText = "正在处理，请稍候...";
+                return;
+            }
+
             // 报告已经生成、只是没传上云端：这次点按钮 = 补交，不再重新调用 AI
             if (submitBtnCheck.dataset.retrySync === '1' && finalReportMarkdown) {
-                return retrySyncCurrent();
+                isSubmitting = true;
+                try {
+                    return await retrySyncCurrent();
+                } finally {
+                    isSubmitting = false;
+                }
             }
 
             if (!userAnswer.trim()) return alert('请先完成内容！');
@@ -1379,8 +1427,10 @@
             if (badWords.some(w => userAnswer.toLowerCase().includes(w.toLowerCase()))) return alert("检测到违规指令，请认真作答！");
             
             const submitBtn = document.getElementById('submit-btn');
-            submitBtn.dataset.retrySync = '0';
+            isSubmitting = true;
+            // 立刻锁住按钮，防止触摸屏连点
             submitBtn.disabled = true;
+            submitBtn.dataset.retrySync = '0';
             submitBtn.innerText = "AI 深度诊断中...";
 
             const analysisBox = document.getElementById('analysis-box');
@@ -1556,6 +1606,8 @@ ${reportFormat}
                 submitBtn.disabled = false;
                 submitBtn.dataset.retrySync = '0';
                 submitBtn.innerText = "重新诊断";
+            } finally {
+                isSubmitting = false;
             }
         }
 
@@ -1789,11 +1841,17 @@ ${reportFormat}
             return "报告已经生成好了，但数据在传给老师时被网络拦了一下（这是浏览器安全策略或线路问题，不是你写错了）。\n\n内容已经完整保存在本机：换到 Wi-Fi 或信号好的地方，打开【复盘】或刷新页面就会自动补交，不用重新写。\n\n（技术信息：" + raw.slice(0, 80) + "）";
         }
 
+        // 追问锁：同时只允许一个问题在等回复，防止连点导致回复串行错乱或重复扣费
+        let isFollowingUp = false;
+
         async function sendFollowup() {
+            if (isFollowingUp) return;
             const input = document.getElementById('followup-input');
             const text = input.value.trim();
             if (!text) return;
 
+            isFollowingUp = true;
+            const followupBtn = document.getElementById('followup-btn');
             const chatContainer = document.getElementById('followup-chat');
             
             const userBubble = document.createElement('div');
@@ -1829,8 +1887,9 @@ ${reportFormat}
             } catch (error) {
                 aiBubble.innerHTML += `<br><span style="color:red">追问失败：${error.message}</span>`;
             } finally {
+                isFollowingUp = false;
                 input.disabled = false;
-                document.getElementById('followup-btn').disabled = false;
+                followupBtn.disabled = false;
                 input.focus();
             }
         }
